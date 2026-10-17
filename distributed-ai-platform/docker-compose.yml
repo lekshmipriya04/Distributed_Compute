@@ -67,7 +67,7 @@ services:
       start_period: 30s
 
   # One-shot: creates the HDFS folders the platform uses, then exits. Runs on
-  # every start and is idempotent, so no manual `make setup-hdfs` is needed.
+  # every start and is idempotent.
   hdfs-init:
     image: apache/hadoop:3
     container_name: hdfs-init

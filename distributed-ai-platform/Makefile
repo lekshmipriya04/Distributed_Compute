@@ -1,4 +1,4 @@
-.PHONY: init up up-dev down reset clean build enable-spark-ray disable-spark-ray test test-unit lint lint-full format setup-hdfs frontend-build go-test
+.PHONY: init up up-dev down reset clean build enable-spark-ray disable-spark-ray test test-unit lint lint-full format frontend-build go-test
 
 init:
 	pip install -e .[dev]
@@ -62,10 +62,6 @@ lint-full:
 
 format:
 	ruff format services/ shared/ tests/
-
-# Not needed any more: the hdfs-init service does this on every start.
-setup-hdfs:
-	bash scripts/setup_hdfs.sh
 
 frontend-build:
 	cd frontend && npm ci && npm run build

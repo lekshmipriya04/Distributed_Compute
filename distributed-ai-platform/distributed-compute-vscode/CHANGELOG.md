@@ -1,9 +1,12 @@
 # Changelog
 
-All notable changes to the Distributed Compute extension are documented here.
+All notable changes to the Distributed AI Compute extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [1.0.2] - 2026-10-17
+## [1.0.0] - 2026-10-17
+
+First release as **Distributed AI Compute** (`aaron43210.distributed-ai-compute`)
+on the VS Code Marketplace and Open VSX. It includes everything below.
 
 ### Added
 - **Run File in Parallel…** and **Run Python File** in the editor's Run
@@ -45,10 +48,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `docker-compose.yml` inside the workspace is never run. `platformPath` can
   only be set per machine.
 
-## [1.0.0] - 2026-10-17
+## Preview - 2026-10-17
 
-First public release. Works on Windows, macOS and Linux (VS Code 1.90+);
-the platform itself runs in Docker.
+Published briefly as `aaron43210.distributed-compute` (since removed). Works
+on Windows, macOS and Linux (VS Code 1.90+); the platform itself runs in Docker.
 
 ### Added
 - Everything from the editor, no dashboard needed: **Add Compute Node** (host

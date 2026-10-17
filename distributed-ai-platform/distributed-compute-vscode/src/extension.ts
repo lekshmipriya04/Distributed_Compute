@@ -133,8 +133,7 @@ function restartPolling(connection: ConnectionManager, refreshAll: () => void, l
     pollTimer = undefined;
   }
   const seconds = readSettings().refreshIntervalSeconds;
-  // REST polling until a client-facing WebSocket event stream exists backend
-  // side (tracked as a gap in docs/backend-api-contract.md).
+  // REST polling until the backend offers a client event stream (WebSocket).
   pollTimer = setInterval(() => {
     if (connection.snapshot().state === 'connected') {
       refreshAll();

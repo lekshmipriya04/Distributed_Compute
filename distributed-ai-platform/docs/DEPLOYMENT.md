@@ -20,7 +20,7 @@ tag the extension downloads for new users.
 | Every step of the extension README, driven in a real VS Code | macOS + Docker | `npm run docs:screenshots` (also re-creates the 20 README images) |
 | Every step of the dashboard README, in the production image | macOS + Docker | `npm run docs:screenshots` in `frontend/` (16 images) |
 | Multi-user end to end (19 tests) | macOS + Docker | `npm run test:e2e`: 3 users on ports 8090/8091/8092, 2 SSH test workers |
-| `.vsix` packages as `aaron43210.distributed-compute@1.0.1`, README image links point into the repository | macOS | `npm run package` |
+| `.vsix` packages as `aaron43210.distributed-ai-compute`, README image links point into the repository | macOS | `npm run package` |
 | Gateway builds for linux, darwin, windows (amd64, arm64) | macOS cross-compile | `go build` with `GOOS`/`GOARCH` |
 | Python services (133 tests), ruff, mypy | macOS | `pytest`, `make lint` |
 | Dashboard unit tests (29), ESLint, build | macOS | `npm test`, `npm run lint`, `npm run build` |
