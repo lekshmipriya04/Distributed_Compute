@@ -3,7 +3,7 @@
 All notable changes to the Distributed Compute extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [1.0.1] - 2026-10-17
+## [1.0.0] - 2026-10-17
 
 ### Added
 - **Run File in Parallel…** and **Run Python File** in the editor's Run
