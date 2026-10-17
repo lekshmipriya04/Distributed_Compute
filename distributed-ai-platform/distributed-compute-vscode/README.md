@@ -234,7 +234,7 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type
 ## Teams and remote masters
 
 The platform can run on one shared machine for a whole team (see the
-[deployment guide](https://github.com/lekshmipriya04/Distributed-Data-Processing-Task-Execution-Platform/blob/main/distributed-ai-platform/docs/DEPLOYMENT.md)).
+[deployment guide](https://github.com/lekshmipriya04/Distributed_Compute/blob/main/distributed-ai-platform/docs/DEPLOYMENT.md)).
 Each person then:
 
 1. runs **Configure Master URL** with the address they were given, e.g.
@@ -256,7 +256,7 @@ also use the web dashboard.
 | "Wrong password" / password logins refused | Try again, or leave the password empty to get a command to install the key yourself. |
 | A worker shows `unreachable` | **Test Node Connection**. If it moved to a new address, remove it and add it again. |
 | A language is missing from the list | Install it on the worker, then **Detect Node Hardware Again**. |
-| Anything else | **Show Diagnostics** shows what the extension did; include it (without passwords or tokens) in an [issue](https://github.com/lekshmipriya04/Distributed-Data-Processing-Task-Execution-Platform/issues). |
+| Anything else | **Show Diagnostics** shows what the extension did; include it (without passwords or tokens) in an [issue](https://github.com/lekshmipriya04/Distributed_Compute/issues). |
 
 ## Security and privacy
 
@@ -282,7 +282,7 @@ npm run package      # build the .vsix
 
 Press F5 to start an Extension Development Host. End-to-end tests against the
 real platform (`make up-dev`) are described in the repository's
-[CONTRIBUTING.md](https://github.com/lekshmipriya04/Distributed-Data-Processing-Task-Execution-Platform/blob/main/CONTRIBUTING.md).
+[CONTRIBUTING.md](https://github.com/lekshmipriya04/Distributed_Compute/blob/main/CONTRIBUTING.md).
 The screenshots above are taken by `npm run docs:screenshots`.
 
 ## Authors and license

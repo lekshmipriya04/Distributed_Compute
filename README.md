@@ -1,6 +1,6 @@
 # Distributed Compute
 
-[![CI](https://github.com/lekshmipriya04/Distributed-Data-Processing-Task-Execution-Platform/actions/workflows/ci.yml/badge.svg)](https://github.com/lekshmipriya04/Distributed-Data-Processing-Task-Execution-Platform/actions/workflows/ci.yml)
+[![CI](https://github.com/lekshmipriya04/Distributed_Compute/actions/workflows/ci.yml/badge.svg)](https://github.com/lekshmipriya04/Distributed_Compute/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Platform 0.1.0](https://img.shields.io/badge/platform-0.1.0-informational)
 [![VS Code extension](https://img.shields.io/visual-studio-marketplace/v/aaron43210.distributed-compute?label=VS%20Code%20extension)](https://marketplace.visualstudio.com/items?itemName=aaron43210.distributed-compute)
@@ -54,8 +54,8 @@ Node**.
 **From a terminal:**
 
 ```bash
-git clone https://github.com/lekshmipriya04/Distributed-Data-Processing-Task-Execution-Platform.git
-cd Distributed-Data-Processing-Task-Execution-Platform/distributed-ai-platform
+git clone https://github.com/lekshmipriya04/Distributed_Compute.git
+cd Distributed_Compute/distributed-ai-platform
 make up          # first start builds the images: several minutes
 ```
 

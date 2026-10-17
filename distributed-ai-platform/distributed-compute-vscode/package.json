@@ -13,13 +13,13 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/lekshmipriya04/Distributed-Data-Processing-Task-Execution-Platform.git",
+    "url": "https://github.com/lekshmipriya04/Distributed_Compute.git",
     "directory": "distributed-ai-platform/distributed-compute-vscode"
   },
   "bugs": {
-    "url": "https://github.com/lekshmipriya04/Distributed-Data-Processing-Task-Execution-Platform/issues"
+    "url": "https://github.com/lekshmipriya04/Distributed_Compute/issues"
   },
-  "homepage": "https://github.com/lekshmipriya04/Distributed-Data-Processing-Task-Execution-Platform#readme",
+  "homepage": "https://github.com/lekshmipriya04/Distributed_Compute#readme",
   "engines": { "vscode": "^1.90.0" },
   "categories": ["Other", "Machine Learning", "Visualization"],
   "keywords": ["distributed", "compute", "ssh", "remote execution", "machine learning"],
@@ -349,7 +349,7 @@
     "test:vscode": "npm run compile && node ./e2e/vscode/run.js",
     "docs:screenshots": "npm run compile && node ./e2e/screenshots/capture.mjs",
     "vscode:prepublish": "npm run build:prod",
-    "package": "vsce package --baseContentUrl https://github.com/lekshmipriya04/Distributed-Data-Processing-Task-Execution-Platform/blob/main/distributed-ai-platform/distributed-compute-vscode --baseImagesUrl https://github.com/lekshmipriya04/Distributed-Data-Processing-Task-Execution-Platform/raw/main/distributed-ai-platform/distributed-compute-vscode"
+    "package": "vsce package --baseContentUrl https://github.com/lekshmipriya04/Distributed_Compute/blob/main/distributed-ai-platform/distributed-compute-vscode --baseImagesUrl https://github.com/lekshmipriya04/Distributed_Compute/raw/main/distributed-ai-platform/distributed-compute-vscode"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

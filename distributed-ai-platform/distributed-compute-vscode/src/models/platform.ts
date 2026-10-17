@@ -2,7 +2,7 @@
 // free of the vscode API so they can be unit tested.
 
 /** Where the extension downloads the platform when the user has no copy. */
-export const PLATFORM_REPO = 'https://github.com/lekshmipriya04/Distributed-Data-Processing-Task-Execution-Platform.git';
+export const PLATFORM_REPO = 'https://github.com/lekshmipriya04/Distributed_Compute.git';
 
 /**
  * The platform release this extension version was tested with. The extension

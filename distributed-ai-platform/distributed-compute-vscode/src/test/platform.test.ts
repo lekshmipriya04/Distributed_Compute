@@ -96,7 +96,7 @@ describe('platform download', () => {
     expect(platformTag('v0.1.0')).toBe('v0.1.0');
     expect(cloneArgs('0.1.0', '/tmp/p')).toEqual([
       'clone', '--depth', '1', '--branch', 'v0.1.0',
-      'https://github.com/lekshmipriya04/Distributed-Data-Processing-Task-Execution-Platform.git', '/tmp/p',
+      'https://github.com/lekshmipriya04/Distributed_Compute.git', '/tmp/p',
     ]);
     expect(cloneArgs(undefined, '/tmp/p')).not.toContain('--branch');
   });
