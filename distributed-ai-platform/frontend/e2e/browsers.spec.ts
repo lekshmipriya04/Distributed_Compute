@@ -25,7 +25,7 @@ test('every page renders without errors, and deep links work', async ({ page, is
   }
   await expect(page).toHaveTitle('Distributed Compute');
   if (!isMobile) {
-    await expect(page.getByTestId('app-version')).toHaveText('Version 0.1.0');
+    await expect(page.getByTestId('app-version')).toHaveText('Version 2.0.0');
   }
   await page.goto('/no-such-page');
   await expect(page).toHaveURL(/\/ssh$/);

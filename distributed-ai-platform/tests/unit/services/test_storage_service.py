@@ -1,6 +1,8 @@
+import io
 import sys
 import time
 import uuid
+from types import SimpleNamespace
 
 import jwt
 import pytest
@@ -22,32 +24,77 @@ dataset_service_mod = sys.modules[DatasetService.__module__]
 Dataset = dataset_service_mod.Dataset
 
 
-class _FakeUploadFile:
-    """Minimal stand-in for FastAPI's UploadFile.
+blob_store = sys.modules["blob_store"]
 
-    DatasetService.create_dataset only reads ``.filename`` and passes ``.file``
-    straight to the (mocked) HDFS service, so this is enough.
-    """
+
+class _FakeUploadFile:
+    """Minimal stand-in for FastAPI's UploadFile: a name and a binary file."""
 
     def __init__(self, filename: str, content: bytes):
         self.filename = filename
-        self.file = content
+        self.file = io.BytesIO(content)
+
+
+class FakeHdfs:
+    """An in-memory stand-in for the optional HDFS store."""
+
+    name = "hdfs"
+
+    def __init__(self, files=None, up=True):
+        self.files = dict(files or {})
+        self.up = up
+        self.calls = []
+
+    async def put(self, key, src, max_bytes):
+        self.calls.append(("put", key))
+        self.files[key] = src.read()
+        return len(self.files[key])
+
+    async def open(self, key):
+        self.calls.append(("open", key))
+        if not self.up or key not in self.files:
+            raise blob_store.StorageError("unreachable")
+        yield self.files[key]
+
+    async def delete(self, key):
+        self.calls.append(("delete", key))
+        self.files.pop(key, None)
+
+    async def ready(self):
+        return self.up
+
+
+def _settings(tmp_path, backend="local", max_bytes=10_000):
+    return SimpleNamespace(
+        storage_backend=backend,
+        max_upload_size_bytes=max_bytes,
+        hdfs_base_path="/platform",
+        data_dir=str(tmp_path),
+        min_free_disk_bytes=0,
+    )
+
+
+def _service(session, tmp_path, backend="local", hdfs=None, max_bytes=10_000):
+    local = blob_store.LocalFileStore(tmp_path)
+    local.prepare()
+    stores = {"local": local, "hdfs": hdfs or FakeHdfs()}
+    return DatasetService(session, stores, _settings(tmp_path, backend, max_bytes)), stores
+
+
+async def _read(chunks):
+    return b"".join([c async for c in chunks])
 
 
 @pytest.mark.asyncio
-async def test_create_dataset_success():
+async def test_create_dataset_stores_a_local_file(tmp_path):
     db_mock = AsyncMock()
     # session.add() is synchronous in SQLAlchemy; keep it a plain mock so it
     # does not create an un-awaited coroutine.
     db_mock.add = MagicMock()
-    hdfs_mock = AsyncMock()
-
-    service = DatasetService(db_mock, hdfs_mock)
-
-    upload = _FakeUploadFile("test.csv", b"header1,header2\n1,2")
+    service, _ = _service(db_mock, tmp_path)
 
     result = await service.create_dataset(
-        file=upload,
+        file=_FakeUploadFile("test.csv", b"header1,header2\n1,2"),
         name="test_dataset",
         description="A test dataset",
         created_by="test_user",
@@ -55,28 +102,59 @@ async def test_create_dataset_success():
 
     assert result.name == "test_dataset"
     assert result.file_format == "csv"
-    assert result.hdfs_path == f"/platform/raw/{result.id}.csv"
+    assert result.storage_backend == "local"
+    assert result.hdfs_path == f"raw/{result.id}.csv"
+    assert result.size_bytes == len(b"header1,header2\n1,2")
     assert result.created_by == "test_user"
-    # The file object is uploaded to HDFS and the record is committed.
-    hdfs_mock.upload_file.assert_awaited_once()
+    assert (tmp_path / "raw" / f"{result.id}.csv").read_bytes() == b"header1,header2\n1,2"
     db_mock.add.assert_called_once()
     db_mock.commit.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_create_dataset_rejects_unsupported_extension():
+async def test_create_dataset_can_still_write_to_hdfs(tmp_path):
+    db_mock = AsyncMock()
+    db_mock.add = MagicMock()
+    service, stores = _service(db_mock, tmp_path, backend="hdfs")
+    result = await service.create_dataset(_FakeUploadFile("d.parquet", b"PAR1"), "d", None, "u")
+    assert result.storage_backend == "hdfs"
+    assert result.hdfs_path == f"/platform/raw/{result.id}.parquet"
+    assert stores["hdfs"].files[result.hdfs_path] == b"PAR1"
+    assert not list((tmp_path / "raw").iterdir())
+
+
+@pytest.mark.asyncio
+async def test_create_dataset_rejects_unsupported_extension(tmp_path):
     from shared.common.exceptions import ValidationError
 
-    service = DatasetService(AsyncMock(), AsyncMock())
-    upload = _FakeUploadFile("notes.txt", b"nope")
-
+    service, _ = _service(AsyncMock(), tmp_path)
     with pytest.raises(ValidationError):
-        await service.create_dataset(
-            file=upload,
-            name="bad",
-            description=None,
-            created_by=None,
-        )
+        await service.create_dataset(_FakeUploadFile("notes.txt", b"nope"), "bad", None, None)
+    assert not list((tmp_path / "raw").iterdir())
+
+
+@pytest.mark.asyncio
+async def test_create_dataset_refuses_files_over_the_limit(tmp_path):
+    db_mock = AsyncMock()
+    db_mock.add = MagicMock()
+    service, _ = _service(db_mock, tmp_path, max_bytes=10)
+    with pytest.raises(blob_store.FileTooLarge) as err:
+        await service.create_dataset(_FakeUploadFile("big.csv", b"x" * 11), "big", None, "u")
+    assert err.value.http_status == 413
+    assert not list((tmp_path / "raw").iterdir())  # no partial or temporary file
+    db_mock.add.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_commit_removes_the_stored_file(tmp_path):
+    db_mock = AsyncMock()
+    db_mock.add = MagicMock()
+    db_mock.commit.side_effect = RuntimeError("database down")
+    service, _ = _service(db_mock, tmp_path)
+    with pytest.raises(RuntimeError):
+        await service.create_dataset(_FakeUploadFile("a.csv", b"a\n1"), "a", None, "u")
+    assert not list((tmp_path / "raw").iterdir())
+    db_mock.rollback.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -97,12 +175,14 @@ async def session_factory():
     async with factory() as session:
         session.add_all(
             [
-                Dataset(id=ALICE_ID, name="a1", hdfs_path=f"/platform/raw/{ALICE_ID}.csv",
+                # Datasets from before 2.0 live in HDFS ...
+                Dataset(id=ALICE_ID, name="a1", storage_backend="hdfs", hdfs_path=f"/platform/raw/{ALICE_ID}.csv",
                         file_format="csv", created_by="alice", validation_status="pending"),
-                Dataset(id=ALICE_ID_2, name="a2", hdfs_path=f"/platform/raw/{ALICE_ID_2}.csv",
+                Dataset(id=ALICE_ID_2, name="a2", storage_backend="hdfs", hdfs_path=f"/platform/raw/{ALICE_ID_2}.csv",
                         file_format="csv", created_by="alice", validation_status="pending"),
-                Dataset(id=BOB_ID, name="b1", hdfs_path=f"/platform/raw/{BOB_ID}.csv",
-                        file_format="csv", created_by="bob", validation_status="pending"),
+                # ... newer ones in local files.
+                Dataset(id=BOB_ID, name="b1", storage_backend="local", hdfs_path=f"raw/{BOB_ID}.csv",
+                        file_format="csv", created_by="bob", validation_status="pending", size_bytes=7),
             ]
         )
         await session.commit()
@@ -111,18 +191,18 @@ async def session_factory():
 
 
 @pytest.mark.asyncio
-async def test_get_dataset_only_returns_owned(session_factory):
+async def test_get_dataset_only_returns_owned(session_factory, tmp_path):
     async with session_factory() as session:
-        service = DatasetService(session, AsyncMock())
+        service, _ = _service(session, tmp_path)
         assert (await service.get_dataset(ALICE_ID, "alice")).name == "a1"
         assert await service.get_dataset(ALICE_ID, "bob") is None
         assert await service.get_dataset(uuid.uuid4(), "alice") is None
 
 
 @pytest.mark.asyncio
-async def test_list_datasets_scoped_to_owner(session_factory):
+async def test_list_datasets_scoped_to_owner(session_factory, tmp_path):
     async with session_factory() as session:
-        service = DatasetService(session, AsyncMock())
+        service, _ = _service(session, tmp_path)
         items, total = await service.list_datasets("alice")
         assert total == 2
         assert {d.name for d in items} == {"a1", "a2"}
@@ -136,40 +216,70 @@ async def test_list_datasets_scoped_to_owner(session_factory):
 
 
 @pytest.mark.asyncio
-async def test_download_dataset_rejects_other_owner(session_factory):
+async def test_download_reads_each_dataset_from_its_own_store(session_factory, tmp_path):
     from shared.common.exceptions import ValidationError
 
-    hdfs = AsyncMock()
-    hdfs.download_file.return_value = b"x,y\n1,2"
+    hdfs = FakeHdfs({f"/platform/raw/{ALICE_ID}.csv": b"from,hdfs"})
     async with session_factory() as session:
-        service = DatasetService(session, hdfs)
-        content, fmt = await service.download_dataset(BOB_ID, "bob")
-        assert (content, fmt) == (b"x,y\n1,2", "csv")
-        hdfs.download_file.assert_awaited_once_with(f"/platform/raw/{BOB_ID}.csv")
+        service, _ = _service(session, tmp_path, hdfs=hdfs)
+        (tmp_path / "raw" / f"{BOB_ID}.csv").write_bytes(b"x,y\n1,2")
 
-        hdfs.download_file.reset_mock()
+        chunks, fmt, size = await service.download_dataset(BOB_ID, "bob")
+        assert (await _read(chunks), fmt, size) == (b"x,y\n1,2", "csv", 7)
+
+        chunks, _, _ = await service.download_dataset(ALICE_ID, "alice")
+        assert await _read(chunks) == b"from,hdfs"
+        assert hdfs.calls == [("open", f"/platform/raw/{ALICE_ID}.csv")]
+
+        hdfs.calls.clear()
         with pytest.raises(ValidationError):
             await service.download_dataset(BOB_ID, "alice")
-        hdfs.download_file.assert_not_awaited()
+        with pytest.raises(ValidationError):
+            await service.download_dataset(ALICE_ID, "bob")
+        assert hdfs.calls == []
 
 
 @pytest.mark.asyncio
-async def test_delete_dataset_rejects_other_owner(session_factory):
-    hdfs = AsyncMock()
+async def test_download_explains_an_hdfs_dataset_when_hdfs_is_off(session_factory, tmp_path):
     async with session_factory() as session:
-        service = DatasetService(session, hdfs)
+        service, _ = _service(session, tmp_path, hdfs=FakeHdfs(up=False))
+        with pytest.raises(blob_store.StoreUnavailable) as err:
+            await service.download_dataset(ALICE_ID, "alice")
+        assert err.value.http_status == 503
+        assert "make migrate-datasets" in err.value.message
+
+
+@pytest.mark.asyncio
+async def test_download_of_a_missing_local_file_is_an_error_not_a_broken_stream(session_factory, tmp_path):
+    async with session_factory() as session:
+        service, _ = _service(session, tmp_path)
+        with pytest.raises(blob_store.StorageError):
+            await service.download_dataset(BOB_ID, "bob")
+
+
+@pytest.mark.asyncio
+async def test_delete_dataset_rejects_other_owner(session_factory, tmp_path):
+    hdfs = FakeHdfs()
+    async with session_factory() as session:
+        service, _ = _service(session, tmp_path, hdfs=hdfs)
+        bob_file = tmp_path / "raw" / f"{BOB_ID}.csv"
+        bob_file.write_bytes(b"x")
         assert await service.delete_dataset(BOB_ID, "alice") is False
-        hdfs.delete_file.assert_not_awaited()
+        assert bob_file.exists()
 
         assert await service.delete_dataset(BOB_ID, "bob") is True
-        hdfs.delete_file.assert_awaited_once_with(f"/platform/raw/{BOB_ID}.csv")
+        assert not bob_file.exists()
+
+        # An HDFS dataset is removed from HDFS, even when HDFS fails.
+        assert await service.delete_dataset(ALICE_ID, "alice") is True
+        assert hdfs.calls == [("delete", f"/platform/raw/{ALICE_ID}.csv")]
 
     async with session_factory() as session:
-        service = DatasetService(session, AsyncMock())
+        service, _ = _service(session, tmp_path)
         assert await service.get_dataset(BOB_ID, "bob") is None
-        # Alice's data is untouched.
+        # Alice's other data is untouched.
         _, total = await service.list_datasets("alice")
-        assert total == 2
+        assert total == 1
 
 
 # ---------------------------------------------------------------------------

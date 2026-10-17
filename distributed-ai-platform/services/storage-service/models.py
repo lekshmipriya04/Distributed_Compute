@@ -21,7 +21,10 @@ class Dataset(Base):
     name: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # Storage location on HDFS
+    # Where the file is: the store ("local" or "hdfs") and its key there
+    # (local: "raw/<id>.<ext>"; HDFS: "/platform/raw/<id>.<ext>"). The column
+    # keeps its historical name.
+    storage_backend: Mapped[str] = mapped_column(String(16), nullable=False, default="local")
     hdfs_path: Mapped[str] = mapped_column(String(1024), nullable=False, unique=True)
     file_format: Mapped[str] = mapped_column(String(32), nullable=False)  # csv/parquet/json
 

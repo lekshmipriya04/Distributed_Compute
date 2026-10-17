@@ -5,12 +5,11 @@
 export const PLATFORM_REPO = 'https://github.com/lekshmipriya04/Distributed_Compute.git';
 
 /**
- * The platform release this extension version was tested with. The extension
- * and the platform are versioned separately (the Marketplace needed 1.0.x for
- * the extension while the platform is 0.1.x), so bump this when the extension
- * starts relying on a newer platform.
+ * The platform release this extension version was tested with; the extension
+ * downloads that tag. Since 2.0.0 both share one version number, so this
+ * moves with every release.
  */
-export const PLATFORM_RELEASE = '0.1.0';
+export const PLATFORM_RELEASE = '2.0.0';
 
 /** Git tag of a platform release. */
 export function platformTag(release: string): string {

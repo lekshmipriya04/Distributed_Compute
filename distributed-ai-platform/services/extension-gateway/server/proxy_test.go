@@ -263,3 +263,24 @@ func TestNodeStatusUpdateIsValidated(t *testing.T) {
 		t.Fatalf("invalid status = %d", w.Code)
 	}
 }
+
+func TestProxyKeepsStorageErrorsReadable(t *testing.T) {
+	status := http.StatusServiceUnavailable
+	body := `{"error_code":"STORAGE_UNAVAILABLE","message":"This dataset is stored in HDFS, which is not running."}`
+	backend, _ := fakeBackend(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	})
+	s := proxyServer(t, "http://ssh.invalid", backend.URL)
+	w := do(t, s, "GET", "/datasets", "tok-1", nil)
+	if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), "HDFS, which is not running") {
+		t.Fatalf("503 = %d %s", w.Code, w.Body.String())
+	}
+	status = http.StatusInsufficientStorage
+	body = `{"message":"Not enough free disk space to store the dataset"}`
+	w = do(t, s, "GET", "/datasets", "tok-1", nil)
+	if w.Code != http.StatusInsufficientStorage || !strings.Contains(w.Body.String(), "free disk space") {
+		t.Fatalf("507 = %d %s", w.Code, w.Body.String())
+	}
+}

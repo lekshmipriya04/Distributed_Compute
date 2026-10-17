@@ -3,13 +3,17 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class DatasetResponse(BaseModel):
     id: UUID
     name: str
     description: Optional[str] = None
+    storage_backend: str = "hdfs"
+    # Location within that store. ``hdfs_path`` is the historical name of the
+    # same value, kept for clients written before 2.0.
+    storage_path: str = ""
     hdfs_path: str
     file_format: str
     
@@ -26,6 +30,12 @@ class DatasetResponse(BaseModel):
     created_by: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def _storage_path(self) -> "DatasetResponse":
+        if not self.storage_path:
+            self.storage_path = self.hdfs_path
+        return self
 
 
 class DatasetListResponse(BaseModel):

@@ -189,7 +189,8 @@ Everything works on a phone or tablet; the menu moves to the top.
 | "Wrong password" when adding a worker | Check the password and user, or use **Set up the key manually**. |
 | "Could not reach" a worker | Check the address (not `localhost`), that the machine is on and that SSH runs on that port. |
 | A language is greyed out | It is not installed on any online worker. Install it there, then click Re-detect on the worker. |
-| An upload fails just after starting the platform | Storage needs about half a minute after a start; try again. |
+| "This dataset is stored in HDFS, which is not running" | The dataset was uploaded before 2.0.0. Run `make migrate-datasets` once in `distributed-ai-platform/`. |
+| "Not enough free disk space" | Free some disk space for Docker, or delete datasets you no longer need. |
 
 ## For developers
 

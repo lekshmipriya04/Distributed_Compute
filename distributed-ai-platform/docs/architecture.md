@@ -34,11 +34,12 @@ The master runs four services in Docker Compose:
 | Service | Port | Language | Role |
 |---|---|---|---|
 | `api-gateway` | 8000 | Python/FastAPI | Reverse proxy for `/api/v1/storage/*` and `/api/v1/ssh/*` |
-| `storage-service` | 8001 | Python/FastAPI | Datasets: bytes in HDFS (WebHDFS), metadata in Postgres, owner-scoped |
+| `storage-service` | 8001 | Python/FastAPI | Datasets: files in the `datasets` volume (or HDFS), metadata in Postgres, owner-scoped |
 | `ssh-executor` | 8011 | Python/FastAPI | Workers, Task Executor, training, leases. Talks to workers over SSH |
 | `extension-gateway` | 8090 | Go | REST facade for the VS Code extension; forwards to ssh-executor |
 
-Backing systems: PostgreSQL 15 and HDFS (1 NameNode + 3 DataNodes). Two
+Backing systems: PostgreSQL 15 and a Docker volume for dataset files. HDFS
+(1 NameNode + 3 DataNodes) is optional, behind the Compose `hdfs` profile. Two
 throwaway SSH provider containers exist behind the Compose `dev` profile for
 local end-to-end tests.
 
@@ -49,7 +50,7 @@ optional engine installed on the master only on request (section 7). Worker
 nodes never run Spark or Ray.
 
 ```
-Browser (React, Vite :3000) ──/api──▶ api-gateway :8000 ──▶ storage-service :8001 ──▶ HDFS + Postgres
+Browser (React, Vite :3000) ──/api──▶ api-gateway :8000 ──▶ storage-service :8001 ──▶ /data + Postgres
                                                      └────▶ ssh-executor   :8011 ──▶ Postgres
 VS Code extension ──REST──▶ extension-gateway :8090 ─────────▶ ssh-executor   :8011
                                                                     │
@@ -87,8 +88,17 @@ validates the JWT itself. It also serves `/health` and `/metrics`.
 Endpoints: `POST /datasets` (CSV/JSON), `POST /datasets/images` (a ZIP of
 `<label>/<image>` folders, converted with Pillow into a flattened grayscale
 pixel CSV), `GET /datasets`, `GET /datasets/{id}`,
-`GET /datasets/{id}/download`, `DELETE /datasets/{id}`. Bytes go to HDFS over
-WebHDFS (`hdfs_service.py`). Metadata goes to the `datasets` table. Every read
+`GET /datasets/{id}/download`, `DELETE /datasets/{id}`. Bytes go to a store
+(`blob_store.py`): `LocalFileStore` writes `raw/<id>.<ext>` under `/data`
+(temporary file, fsync, rename, so a failed upload never leaves a partial
+file); `WebHdfsStore` writes to HDFS over WebHDFS when
+`STORAGE_BACKEND=hdfs`. Each row records its store in `storage_backend`, so
+both are read side by side; `hdfs_path` keeps its name but holds the key in
+either store. Uploads and downloads are streamed in 1 MiB chunks. Errors: 413
+over `MAX_UPLOAD_SIZE_BYTES`, 507 below `MIN_FREE_DISK_BYTES` free, 503 for a
+dataset in HDFS while HDFS is off. `migrate_datasets.py` (`make
+migrate-datasets`) moves HDFS datasets to local files. Metadata goes to the
+`datasets` table. Every read
 and delete is scoped to `created_by == jwt.sub`. ssh-executor reads on behalf
 of a run owner with an internal token plus `X-On-Behalf-Of` (contract §5).
 
@@ -320,12 +330,16 @@ and the grid-search candidates.
 
 ## 8. Data and storage
 
-- **HDFS**: dataset bytes, written over WebHDFS (`namenode:9870`). Replication
-  is configured in `infrastructure/docker/hadoop`.
+- **Dataset files**: the `datasets` volume, mounted at `/data` in
+  storage-service (runs as uid 10001). `make backup` archives it with a
+  database dump.
+- **HDFS (optional)**: dataset bytes over WebHDFS (`namenode:9870`) with
+  `make up-hdfs`. Replication is configured in `infrastructure/docker/hadoop`.
 - **PostgreSQL**: `datasets` (storage-service); `ssh_nodes`,
   `pending_provisions`, `resource_leases`, `task_batches`, `tasks`,
   `training_runs` (ssh-executor). The schema comes from `create_all` plus
-  idempotent `ADD COLUMN IF NOT EXISTS` statements. There is no migration tool.
+  idempotent `ADD COLUMN IF NOT EXISTS` statements (rows from before 2.0.0
+  get `storage_backend = 'hdfs'`).
   Columns that the list does not cover need a fresh database (`make reset` drops
   the volumes) or a manual `ALTER`.
 - **Workers** keep nothing: their sandboxes are deleted, and the only
@@ -379,9 +393,11 @@ running a file as many parallel tasks; live per-task output; cancel; retry
 ## 11. Deployment, configuration and CI
 
 - `make up` (core stack), `make up-dev` (plus two SSH providers, login
-  `provider/providerpass`, dev only), `make down` (keeps data), `make reset` (drops volumes).
+  `provider/providerpass`, dev only), `make down` (keeps data), `make reset` (drops volumes), `make up-hdfs`
+  (HDFS storage), `make migrate-datasets`, `make backup`.
 - `config/.env` provides `ENVIRONMENT`, `JWT_SECRET`, `SSH_CRED_KEY`,
-  `DATABASE_URL`, `HDFS_WEBHDFS_URL` and `HDFS_USER`. ssh-executor settings
+  `DATABASE_URL` and, for storage, `STORAGE_BACKEND`, `MAX_UPLOAD_SIZE_BYTES`,
+  `MIN_FREE_DISK_BYTES`, `HDFS_WEBHDFS_URL` and `HDFS_USER`. ssh-executor settings
   (`config.py`) include timeouts, output and code caps, `allowed_runtimes`,
   `allowed_hosts`/`allowed_cidrs`, lease TTL, the recovery interval, the stale
   sandbox age and the shard weights.

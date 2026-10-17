@@ -3,6 +3,27 @@
 All notable changes to the Distributed AI Compute extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.0.0] - 2026-10-17
+
+The extension, the platform and the web dashboard now share one version
+number. **Set Up Platform** downloads platform release `v2.0.0`.
+
+### Changed
+- The platform stores datasets as plain files in a Docker volume instead of
+  HDFS. Setup starts 6 containers instead of 10, the platform is ready about
+  10 seconds sooner, and it needs about 0.5 GB of memory instead of 1.9 GB.
+  HDFS is still available with `make up-hdfs`.
+
+### Upgrading
+- Datasets uploaded before 2.0.0 stay in HDFS until you run
+  `make migrate-datasets` once in `distributed-ai-platform/`. Until then,
+  training on one of them fails with a message saying so. Run `make backup`
+  first if you want a copy.
+
+### Fixed
+- Storage errors (a full disk, a file over the size limit, HDFS not running)
+  are shown with their message instead of a generic error.
+
 ## [1.0.0] - 2026-10-17
 
 First release as **Distributed AI Compute** (`aaron43210.distributed-ai-compute`)

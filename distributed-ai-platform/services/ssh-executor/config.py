@@ -65,7 +65,6 @@ class SSHExecutorSettings(BaseServiceSettings):
 
     # --- distributed ML training -----------------------------------------
     storage_service_url: str = Field(default="http://storage-service:8001")
-    hdfs_url: str = Field(default="hdfs://namenode:9000")
     training_timeout_seconds: int = Field(default=600, ge=1)
     max_train_rows: int = Field(default=200_000, ge=1)
     # Compute-weighted sharding: a node's score is

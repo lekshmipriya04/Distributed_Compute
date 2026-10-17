@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/lekshmipriya04/Distributed_Compute/actions/workflows/ci.yml/badge.svg)](https://github.com/lekshmipriya04/Distributed_Compute/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Platform 0.1.0](https://img.shields.io/badge/platform-0.1.0-informational)
+![Version 2.0.0](https://img.shields.io/badge/version-2.0.0-informational)
 [![VS Code extension](https://img.shields.io/visual-studio-marketplace/v/aaron43210.distributed-ai-compute?label=VS%20Code%20extension)](https://marketplace.visualstudio.com/items?itemName=aaron43210.distributed-ai-compute)
 
 **Run code and train models on the computers you already have, over plain
@@ -74,6 +74,10 @@ Use a dedicated, non-admin account on each worker: tasks run with its
 permissions.
 
 `make down` stops everything and keeps your data; `make reset` deletes it.
+`make backup` copies the database and datasets to `backups/<date>/`.
+
+**Upgrading from 1.x?** Run `make up`, then `make migrate-datasets` to move
+datasets out of HDFS. See [Upgrade from 1.x](distributed-ai-platform/docs/DEPLOYMENT.md#6-upgrade-from-1x-and-rollback).
 
 ## One computer, or a team
 
@@ -100,7 +104,7 @@ models. Step-by-step: [docs/DEPLOYMENT.md](distributed-ai-platform/docs/DEPLOYME
 ```
 VS Code extension ─► extension-gateway :8090 ─┐
 Web dashboard :3001 ─► api-gateway :8000 ─────┼─► ssh-executor (the master) ──SSH──► your workers
-                                              └─► storage-service ─► HDFS (datasets)
+                                              └─► storage-service ─► datasets volume
 ```
 
 ![Platform architecture](distributed-ai-platform/docs/architecture-overview.svg)
@@ -120,6 +124,10 @@ Web dashboard :3001 ─► api-gateway :8000 ─────┼─► ssh-execut
   worker's speed, sends each worker its shard and a small script (or your
   `model.py`), and averages the results over several rounds (federated
   averaging).
+- **Datasets.** Files live in the Docker volume `datasets`; names, owners and
+  sizes in Postgres. Uploads and downloads are streamed, so file size does not
+  affect memory. Installs that already run HDFS can keep using it with
+  `make up-hdfs` (adds 4 containers and about 1.4 GB of memory).
 - **Spark + Ray (optional).** `make enable-spark-ray`, or **Enable Spark + Ray
   Engine** in VS Code, adds about 1 GB to the master (never to workers): every
   Spark MLlib model with grid search, Parquet data, and Ray for the parameter
@@ -168,7 +176,8 @@ For dashboard development with hot reload: `cd frontend && npm run dev`
   Windows workers have not been verified yet.**
 - `ssh-executor` runs code you send on your workers: treat it as a privileged
   service. Put HTTPS in front of it when anyone else can reach it.
-- Database changes are additive only; there is no migration tool yet.
+- Database changes are additive only; `make migrate-datasets` is the only
+  data migration so far.
 
 ## Contributing
 
@@ -186,7 +195,7 @@ distributed-ai-platform/
 ├── distributed-compute-vscode/  VS Code extension
 ├── services/                    api-gateway, storage-service, ssh-executor (Python), extension-gateway (Go)
 ├── shared/                      shared Python library
-├── infrastructure/docker/       Postgres init, Hadoop config
+├── infrastructure/docker/       Postgres init, Hadoop config (optional HDFS)
 ├── docs/                        architecture, API, deployment, images
 └── tests/                       Python unit tests, load test
 ```

@@ -564,7 +564,7 @@ def _read_rows(
     )
     with httpx.Client(timeout=300.0) as client:
         resp = client.get(download_url, headers=_storage_headers(owner_id))
-        resp.raise_for_status()
+        _check_storage_response(resp)
         raw_bytes = resp.content
 
     text = raw_bytes.decode("utf-8", errors="replace")
@@ -894,11 +894,25 @@ class _RunContext:
 
 
 # --- dataset access ------------------------------------------------------
+def _check_storage_response(resp: httpx.Response) -> None:
+    """Raise with storage-service's own message (e.g. "stored in HDFS, which is
+    not running") instead of a bare HTTP status."""
+    if not resp.is_error:
+        return
+    try:
+        message = resp.json().get("message")
+    except ValueError:
+        message = None
+    if message:
+        raise RuntimeError(f"Could not read the dataset: {message}")
+    resp.raise_for_status()
+
+
 async def _fetch_metadata(dataset_id, settings, owner_id: Optional[str]) -> dict:
     url = f"{settings.storage_service_url}/api/v1/storage/datasets/{dataset_id}"
     async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.get(url, headers=_storage_headers(owner_id))
-        resp.raise_for_status()
+        _check_storage_response(resp)
         return resp.json()
 
 
@@ -910,7 +924,9 @@ def _download_to_file(metadata: dict, settings, owner_id: Optional[str]) -> str:
     try:
         with os.fdopen(fd, "wb") as out, httpx.Client(timeout=600.0) as client:
             with client.stream("GET", url, headers=_storage_headers(owner_id)) as resp:
-                resp.raise_for_status()
+                if resp.is_error:
+                    resp.read()
+                _check_storage_response(resp)
                 for chunk in resp.iter_bytes(1024 * 1024):
                     out.write(chunk)
     except BaseException:

@@ -607,3 +607,20 @@ async def test_spark_mllib_bad_data_fails_with_readable_message(orch, monkeypatc
     await orch.run_training(run.id)
     assert run.status == "failed"
     assert run.message == "Spark training failed: Target column 'nope' not found in dataset"
+
+
+def test_storage_errors_keep_the_storage_message(orch):
+    """A run on an unreadable dataset says why (e.g. HDFS is off), not just "503"."""
+    import httpx
+
+    request = httpx.Request("GET", "http://storage-service:8001/api/v1/storage/datasets/x/download")
+    stored_in_hdfs = httpx.Response(503, request=request, json={
+        "error_code": "STORAGE_UNAVAILABLE",
+        "message": "This dataset is stored in HDFS, which is not running.",
+    })
+    with pytest.raises(RuntimeError, match="Could not read the dataset: This dataset is stored in HDFS"):
+        orch._check_storage_response(stored_in_hdfs)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        orch._check_storage_response(httpx.Response(502, request=request, text="bad gateway"))
+    orch._check_storage_response(httpx.Response(200, request=request, content=b"a,b\n"))

@@ -565,6 +565,14 @@ func mapUpstreamStatus(method, path string, status int, body []byte) error {
 		return &StatusError{Status: http.StatusNotImplemented, Code: "not_implemented",
 			Message: "This capability is not supported by the connected backend yet",
 			Err:     fmt.Errorf("%w: %v", ErrNotImplemented, cause)}
+	case status == http.StatusServiceUnavailable && detail != "":
+		// e.g. a dataset kept in HDFS while HDFS is not running; the
+		// message says how to fix it.
+		return &StatusError{Status: http.StatusServiceUnavailable, Code: "unavailable",
+			Message: detail, Err: cause}
+	case status == http.StatusInsufficientStorage:
+		return &StatusError{Status: http.StatusInsufficientStorage, Code: "insufficient_storage",
+			Message: withDetail("The master is out of disk space for datasets"), Err: cause}
 	case status == http.StatusGatewayTimeout:
 		return &StatusError{Status: http.StatusGatewayTimeout, Code: "upstream_timeout",
 			Message: "The backend did not respond in time", Err: cause}

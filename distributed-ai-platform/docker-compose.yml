@@ -38,9 +38,14 @@ services:
       start_period: 10s
 
  
+  # --- Optional HDFS (profile "hdfs") ----------------------------------------
+  # Not started by default: datasets are stored as files in the `datasets`
+  # volume. For an existing HDFS setup, or to move old datasets out of it:
+  # `make up-hdfs` / `make migrate-datasets`.
   namenode:
     image: apache/hadoop:3
     container_name: namenode
+    profiles: ["hdfs"]
     restart: unless-stopped
     user: root
     environment:
@@ -71,6 +76,7 @@ services:
   hdfs-init:
     image: apache/hadoop:3
     container_name: hdfs-init
+    profiles: ["hdfs"]
     user: root
     environment:
       - HADOOP_CONF_DIR=/opt/hadoop/etc/hadoop
@@ -92,6 +98,7 @@ services:
   datanode-1:
     image: apache/hadoop:3
     container_name: datanode-1
+    profiles: ["hdfs"]
     restart: unless-stopped
     hostname: datanode-1
     # Data dir is a named volume owned by root; the datanode enforces
@@ -118,6 +125,7 @@ services:
   datanode-2:
     image: apache/hadoop:3
     container_name: datanode-2
+    profiles: ["hdfs"]
     restart: unless-stopped
     hostname: datanode-2
     user: root
@@ -140,6 +148,7 @@ services:
   datanode-3:
     image: apache/hadoop:3
     container_name: datanode-3
+    profiles: ["hdfs"]
     restart: unless-stopped
     hostname: datanode-3
     user: root
@@ -196,8 +205,13 @@ services:
     container_name: storage-service
     env_file:
       - config/.env
+    environment:
+      # "local" (files in the datasets volume, the default) or "hdfs".
+      - STORAGE_BACKEND=${STORAGE_BACKEND:-local}
     ports:
       - "${BIND_ADDR:-127.0.0.1}:8001:8001"
+    volumes:
+      - datasets:/data
     networks:
       - platform-net
     restart: unless-stopped
@@ -210,10 +224,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      # Only with the "hdfs" profile; ignored otherwise.
       namenode:
         condition: service_healthy
+        required: false
       hdfs-init:
         condition: service_completed_successfully
+        required: false
 
   ssh-executor:
     build:
@@ -334,6 +351,8 @@ services:
 
 volumes:
   postgres_data:
+  # Dataset files (STORAGE_BACKEND=local).
+  datasets:
   hadoop_namenode:
   hadoop_datanode_1:
   hadoop_datanode_2:

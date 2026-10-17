@@ -1,5 +1,6 @@
 from __future__ import annotations
 from functools import lru_cache
+from typing import Literal
 from pydantic import Field
 from shared.common.config import BaseServiceSettings
 
@@ -21,7 +22,13 @@ class StorageSettings(BaseServiceSettings):
     allowed_file_extensions: list[str] = Field(
         default=[".csv", ".parquet", ".json", ".jsonl"],
     )
-    hdfs_replication_factor: int = Field(default=1, ge=1, le=3)
+    # Where new dataset files go: "local" (files under data_dir, the default)
+    # or "hdfs" (WebHDFS at hdfs_webhdfs_url; start with `make up-hdfs`).
+    # Existing files are always read from the store that holds them.
+    storage_backend: Literal["local", "hdfs"] = Field(default="local")
+    data_dir: str = Field(default="/data")
+    # Refuse new uploads when the data disk would drop below this.
+    min_free_disk_bytes: int = Field(default=512 * 1024 ** 2, ge=0)
     allowed_origins: list[str] = Field(default=["http://localhost:3000"])
 
 @lru_cache(maxsize=1)

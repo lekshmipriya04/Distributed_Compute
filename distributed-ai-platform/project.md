@@ -62,7 +62,8 @@ executions, submits the active file, and runs and tracks training jobs.
   `max_available`), and a recovery loop.
 - Pure-Python distributed training with compute-weighted shards and ONNX
   export.
-- Owner-scoped datasets (HDFS + Postgres), CSV/JSON and image-ZIP upload.
+- Owner-scoped datasets (local files + Postgres; HDFS optional), CSV/JSON and
+  image-ZIP upload, streamed, with `make migrate-datasets` and `make backup`.
 - React UI (`/ssh`, `/execute`, `/train`). VS Code extension plus Go gateway.
 
 ### Not provided / limits
@@ -83,7 +84,7 @@ executions, submits the active file, and runs and tracks training jobs.
 ## 4. Architecture
 
 ```
-Browser (React :3000) ──▶ api-gateway :8000 ──▶ storage-service :8001 ──▶ HDFS (1 NN + 3 DN), Postgres
+Browser (React :3000) ──▶ api-gateway :8000 ──▶ storage-service :8001 ──▶ /data volume, Postgres
                                          └────▶ ssh-executor   :8011 ──▶ Postgres
 VS Code extension ──▶ extension-gateway :8090 (Go) ──▶ ssh-executor :8011
 ssh-executor ══SSH (managed key, pinned host key)══▶ workers: sshd + python3
@@ -92,7 +93,7 @@ ssh-executor ══SSH (managed key, pinned host key)══▶ workers: sshd + p
 | Service | Port | Responsibility |
 |---|---|---|
 | api-gateway | 8000 | Proxies `/api/v1/storage/*` and `/api/v1/ssh/*` |
-| storage-service | 8001 | Datasets, owner-scoped; HDFS via WebHDFS |
+| storage-service | 8001 | Datasets, owner-scoped; local files, or HDFS via WebHDFS |
 | ssh-executor | 8011 | Workers, runtimes, batches, training, leases |
 | extension-gateway | 8090 | Extension REST API that forwards to ssh-executor with the user's JWT |
 
@@ -107,7 +108,7 @@ resource manager, scheduler and the `worker/` agent.
 | Services | Python 3.11, FastAPI, SQLAlchemy (async), asyncpg, pydantic v2, structlog |
 | SSH | paramiko; Ed25519 keys via `cryptography`; Fernet at rest |
 | Training | Pure Python on the master, with numpy for ONNX export; stdlib-only scripts on workers |
-| Storage | PostgreSQL 15, HDFS 3 (WebHDFS) |
+| Storage | PostgreSQL 15, files in a Docker volume; HDFS 3 (WebHDFS) optional |
 | Frontend | React 18, TypeScript, Vite, Tailwind |
 | Editor | VS Code extension (TypeScript, esbuild, vitest), Go (`go.mod`: 1.27) `net/http` gateway |
 | Packaging | Docker Compose; GitHub Actions CI file (see §8) |
@@ -127,7 +128,8 @@ build inside the sandbox, so build caches are deleted with it.
 ## 7. Configuration
 
 `config/.env` (from `config/.env.example`): `ENVIRONMENT`, `JWT_SECRET`,
-`SSH_CRED_KEY`, `DATABASE_URL`, `HDFS_WEBHDFS_URL`, `HDFS_USER`. Outside
+`SSH_CRED_KEY`, `DATABASE_URL`; storage: `STORAGE_BACKEND` (`local` or `hdfs`),
+`MAX_UPLOAD_SIZE_BYTES`, `MIN_FREE_DISK_BYTES`, `HDFS_WEBHDFS_URL`, `HDFS_USER`. Outside
 `development`, services refuse to start with placeholder or short (< 32 chars)
 secrets. The ssh-executor tunables are in `services/ssh-executor/config.py`:
 task timeouts, output and code caps, `allowed_runtimes`,
@@ -166,7 +168,7 @@ distributed-ai-platform/
 ├── shared/                   # auth, config, logging, metrics, DB manager
 ├── frontend/                 # React UI
 ├── distributed-compute-vscode/
-├── infrastructure/docker/    # postgres init, hadoop config
+├── infrastructure/docker/    # postgres init, hadoop config (optional HDFS)
 ├── tests/unit/services/      # pytest suites
 ├── tests/load/locustfile.py  # load test for /api/v1/ssh/batches
 ├── docs/                     # architecture, connections, API contract, plan/status

@@ -11,11 +11,11 @@ which protocol and which credentials. For the architecture, see
 |---|---|---|---|---|
 | Frontend (Vite dev server) | not in Compose | 3000 | HTTP | Proxies `/api` and `/health` to `localhost:8000` |
 | api-gateway | `api-gateway` | 8000 | HTTP | Only ingress for the browser |
-| storage-service | `storage-service` | 8001 | HTTP | |
+| storage-service | `storage-service` | 8001 | HTTP | Dataset files in the `datasets` volume at `/data` |
 | ssh-executor | `ssh-executor` | 8011 | HTTP | Outbound SSH to workers |
 | extension-gateway (Go) | `extension-gateway` | 8090 | HTTP | For the VS Code extension |
 | PostgreSQL 15 | `postgres` | 5432 | PostgreSQL | |
-| HDFS NameNode | `namenode` | 9870 (WebHDFS/UI), 9000 (RPC) | HTTP / Hadoop RPC | 3 DataNodes on the internal network |
+| HDFS NameNode (optional) | `namenode` | 9870 (WebHDFS/UI), 9000 (RPC) | HTTP / Hadoop RPC | `--profile hdfs` only; 3 DataNodes on the internal network |
 | SSH dev providers | `ssh-provider`, `ssh-provider-2` | not published | SSH :2222 | `--profile dev` only; login `provider/providerpass` |
 | Workers | your machines | 22 (or as registered) | SSH | `sshd` + `python3`, nothing else |
 
@@ -42,7 +42,8 @@ addresses the others by container name.
 | From | To | Protocol | Purpose |
 |---|---|---|---|
 | storage-service | Postgres :5432 | asyncpg | `datasets` metadata |
-| storage-service | NameNode :9870 → DataNodes | WebHDFS (HTTP, redirect to a DataNode) | Dataset bytes |
+| storage-service | `/data` (volume `datasets`) | local files | Dataset bytes (default) |
+| storage-service | NameNode :9870 → DataNodes | WebHDFS (HTTP, redirect to a DataNode) | Dataset bytes with `STORAGE_BACKEND=hdfs`, and older datasets until migrated |
 | ssh-executor | Postgres :5432 | asyncpg | Nodes, pending provisions, leases, batches, tasks, training runs |
 | ssh-executor | storage-service :8001 | HTTP | Training reads dataset metadata and bytes with an internal JWT (`internal: true`) plus `X-On-Behalf-Of: <run owner>` |
 
@@ -94,7 +95,7 @@ UI ─POST /batches/{id}/cancel─▶ status cancelling → kill process group b
 
 ### 4.3 Train
 ```
-UI ─POST /storage/datasets (or /datasets/images)─▶ storage-service → HDFS + Postgres
+UI ─POST /storage/datasets (or /datasets/images)─▶ storage-service → /data + Postgres
 UI ─POST /ssh/train {dataset_id, model_type, mode,...}─▶ ssh-executor
 ssh-executor ─GET dataset (internal JWT + X-On-Behalf-Of)─▶ storage-service
 multi:  lease nodes → compute-weighted shards → stdlib script + shard per worker sandbox

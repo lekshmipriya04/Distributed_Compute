@@ -1,26 +1,23 @@
 FROM python:3.11-slim-bookworm
 
-# Install libhdfs native library dependencies
-RUN apt-get update && apt-get install -y \
-    openjdk-17-jdk-headless \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-ENV HADOOP_HOME=/opt/hadoop
-ENV PATH=$PATH:$HADOOP_HOME/bin
-
 WORKDIR /app
 
 # Using pip to install the package dependencies from pyproject.toml
 COPY services/storage-service/pyproject.toml .
-RUN pip install .
+RUN pip install --no-cache-dir .
 
 # Copy shared libraries first (layer caching)
 COPY shared/ /app/shared/
 
 # Copy service code
 COPY services/storage-service/ /app/
+
+# Dataset files live in /data (a volume in docker-compose.yml). The service
+# runs as an unprivileged user that owns only that directory.
+RUN useradd --system --uid 10001 --home-dir /nonexistent --shell /usr/sbin/nologin app \
+    && mkdir -p /data \
+    && chown app /data
+USER app
 
 EXPOSE 8001
 

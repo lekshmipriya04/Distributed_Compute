@@ -31,7 +31,7 @@ class BaseServiceSettings(BaseSettings):
 
     # ── Service identity ──────────────────────
     service_name: str = Field(default="platform-service")
-    service_version: str = Field(default="0.1.0")
+    service_version: str = Field(default="2.0.0")
     environment: Environment = Field(default=Environment.DEVELOPMENT)
     debug: bool = Field(default=False)
     use_null_pool: bool = Field(default=False, description="Set True in tests to disable connection pooling")
@@ -74,10 +74,9 @@ class BaseServiceSettings(BaseSettings):
     metrics_enabled: bool = Field(default=True)
     tracing_enabled: bool = Field(default=False)
 
-    # ── HDFS ─────────────────────────────────
-    hdfs_url: str = Field(default="hdfs://namenode:9000")
-    # WebHDFS REST endpoint (namenode HTTP port) used by the storage service to
-    # upload/read files over the two-step CREATE protocol.
+    # ── Optional HDFS (STORAGE_BACKEND=hdfs) ──
+    # WebHDFS REST endpoint (namenode HTTP port) used by the storage service
+    # when datasets are kept in HDFS.
     hdfs_webhdfs_url: str = Field(default="http://namenode:9870")
     hdfs_user: str = Field(default="hadoop")
     hdfs_base_path: str = Field(default="/platform")
@@ -95,21 +94,6 @@ class BaseServiceSettings(BaseSettings):
     def is_production(self) -> bool:
         return self.environment == Environment.PRODUCTION
 
-    @property
-    def hdfs_raw_path(self) -> str:
-        return f"{self.hdfs_base_path}/raw"
-
-    @property
-    def hdfs_processed_path(self) -> str:
-        return f"{self.hdfs_base_path}/processed"
-
-    @property
-    def hdfs_models_path(self) -> str:
-        return f"{self.hdfs_base_path}/models"
-
-    @property
-    def hdfs_logs_path(self) -> str:
-        return f"{self.hdfs_base_path}/logs"
 
 
 @lru_cache(maxsize=1)

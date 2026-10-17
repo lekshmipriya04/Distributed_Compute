@@ -34,7 +34,8 @@ _SERVICE_LOCAL_NAMES = {
     "main",
     "error_handlers",
     "dataset_service",
-    "hdfs_service",
+    "blob_store",
+    "migrate_datasets",
 }
 
 
@@ -48,9 +49,22 @@ def import_service_module(service_dirname: str, module_name: str):
     if not service_path.is_dir():
         raise FileNotFoundError(f"Service directory not found: {service_path}")
 
-    for name in list(sys.modules):
-        if name in _SERVICE_LOCAL_NAMES:
-            del sys.modules[name]
+    # Already loaded from this service: reuse it. Reloading would define the
+    # service's ORM tables a second time on the shared SQLAlchemy metadata.
+    cached = sys.modules.get(module_name)
+    if cached is not None and str(service_path) in (getattr(cached, "__file__", "") or ""):
+        return cached
+    # Loading a module the service shares with others ("models", "config", …)
+    # from a different service: clear them first, unless this service's own
+    # copies are what is loaded (then extend them, as an import would).
+    loaded_here = any(
+        str(service_path) in (getattr(sys.modules.get(n), "__file__", "") or "")
+        for n in _SERVICE_LOCAL_NAMES
+    )
+    if not loaded_here:
+        for name in list(sys.modules):
+            if name in _SERVICE_LOCAL_NAMES:
+                del sys.modules[name]
 
     sys.path.insert(0, str(service_path))
     try:

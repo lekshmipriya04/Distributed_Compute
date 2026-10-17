@@ -27,8 +27,8 @@
   <text x="38" y="122" class="t">React web app (Vite :3000)</text>
   <text x="38" y="142" class="s">/ssh workers · /execute tasks · /train</text>
   <rect x="24" y="178" width="250" height="56" class="box infra"/>
-  <text x="38" y="201" class="t">HDFS (1 NameNode + 3 DataNodes)</text>
-  <text x="38" y="220" class="s">WebHDFS :9870 · dataset bytes</text>
+  <text x="38" y="201" class="t">Dataset files (volume /data)</text>
+  <text x="38" y="220" class="s">dataset bytes · HDFS optional</text>
   <rect x="24" y="270" width="250" height="64" class="box client"/>
   <text x="38" y="294" class="t">VS Code extension</text>
   <text x="38" y="314" class="s">nodes, slices, executions, run file</text>

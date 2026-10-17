@@ -93,6 +93,8 @@ describe('error messages', () => {
     expect(httpStatusToError(502, undefined, 'Connection refused by 10.0.0.5:22').message).toBe('Connection refused by 10.0.0.5:22');
     expect(httpStatusToError(400, undefined, 'The worker refused the password').message).toBe('The worker refused the password');
     expect(httpStatusToError(401, undefined, 'whatever').kind).toBe('auth');
+    expect(httpStatusToError(503, undefined, 'This dataset is stored in HDFS, which is not running.').message).toMatch(/HDFS/);
+    expect(httpStatusToError(507, undefined, 'Not enough free disk space').message).toBe('Not enough free disk space');
   });
 });
 

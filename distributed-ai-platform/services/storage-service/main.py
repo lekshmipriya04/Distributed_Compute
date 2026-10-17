@@ -2,9 +2,11 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import make_asgi_app
 
+from blob_store import LOCAL, build_stores
 from routes import router as dataset_router
 from config import get_storage_settings
 from database import get_db_manager
@@ -24,10 +26,15 @@ async def lifespan(app: FastAPI):
     assert_secure_secrets(settings.environment, JWT_SECRET=settings.jwt_secret)
     assert_secure_database_url(settings.environment, settings.database_url)
 
+    stores = build_stores(settings)
+    if settings.storage_backend == LOCAL:
+        # Fail fast on a missing or read-only data directory.
+        stores[LOCAL].prepare()
+
     db_manager = get_db_manager()
     await db_manager.initialize()
     await db_manager.create_tables()
-    logger.info("storage_service_started")
+    logger.info("storage_service_started", extra={"storage_backend": settings.storage_backend})
     yield
     # Shutdown
     await db_manager.dispose()
@@ -70,7 +77,17 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health_check():
-        return {"status": "ok", "service": settings.service_name}
+        """Healthy when the store new datasets go to can be used."""
+        store = build_stores(settings)[settings.storage_backend]
+        ready = await store.ready()
+        body = {
+            "status": "ok" if ready else "degraded",
+            "service": settings.service_name,
+            "storage": {"backend": settings.storage_backend, "ready": ready},
+        }
+        if settings.storage_backend == LOCAL and ready:
+            body["storage"]["free_bytes"] = store.free_bytes()
+        return JSONResponse(body, status_code=200 if ready else 503)
 
     return app
 

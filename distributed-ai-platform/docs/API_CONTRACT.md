@@ -232,3 +232,18 @@ delete. Internal calls from ssh-executor use `create_internal_token("ssh-executo
 (claim `internal: true`) **and** header `X-On-Behalf-Of: <owner_id>`. storage-service
 honours that header only when the token has `internal: true`, and then scopes to
 that owner.
+
+Each dataset carries `storage_backend` (`local`, or `hdfs` for datasets stored
+in HDFS, including every dataset from before 2.0.0) and `storage_path` (the
+file's key in that store; `hdfs_path` holds the same value and is kept for
+older clients). Uploads and downloads are streamed. Storage errors:
+
+| Status | `error_code` | When |
+|---|---|---|
+| 413 | `FILE_TOO_LARGE` | The upload is over `MAX_UPLOAD_SIZE_BYTES` (default 500 MB) |
+| 503 | `STORAGE_UNAVAILABLE` | The dataset is in HDFS and HDFS is not running; the message says to run `make up-hdfs` or `make migrate-datasets` |
+| 507 | `INSUFFICIENT_STORAGE` | Less than `MIN_FREE_DISK_BYTES` (default 512 MiB) would be left free |
+
+A training run on a dataset that cannot be read fails with that message. The
+extension gateway passes 413, 503 and 507 through with the message, as
+`too_large`, `unavailable` and `insufficient_storage`.

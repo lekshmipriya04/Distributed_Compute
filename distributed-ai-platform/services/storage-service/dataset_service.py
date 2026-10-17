@@ -1,6 +1,6 @@
 """
 High-level service for handling dataset lifecycle:
-1. Upload to HDFS
+1. Store the file (local files by default, or HDFS; see blob_store.py)
 2. Extract metadata
 3. Validate
 4. Persist to PostgreSQL
@@ -11,23 +11,48 @@ import json
 import uuid
 import zipfile
 import structlog
-from typing import Optional
+from typing import AsyncIterator, Optional
 from fastapi import UploadFile
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
+from blob_store import HDFS, BlobStore, FileTooLarge, StoreUnavailable, new_key
 from models import Dataset
-from hdfs_service import HDFSService
-from shared.common.exceptions import ValidationError
+from shared.common.exceptions import StorageError, ValidationError
 
 logger = structlog.get_logger(__name__)
 
 
 class DatasetService:
-    def __init__(self, db_session: AsyncSession, hdfs_service: HDFSService):
+    def __init__(self, db_session: AsyncSession, stores: dict[str, BlobStore], settings):
         self._db = db_session
-        self._hdfs = hdfs_service
+        self._stores = stores
+        self._settings = settings
+        # New files go to the configured store; existing ones are read from
+        # the store recorded on their row.
+        self._backend = settings.storage_backend
+        self._max_bytes = settings.max_upload_size_bytes
+
+    async def _store_new(self, dataset_id: uuid.UUID, file_format: str, src) -> tuple[str, int]:
+        key = new_key(self._backend, str(dataset_id), file_format, self._settings)
+        size = await self._stores[self._backend].put(key, src, self._max_bytes)
+        return key, size
+
+    async def _save(self, dataset: Dataset) -> Dataset:
+        """Commit the row; if that fails, remove the file just stored."""
+        try:
+            self._db.add(dataset)
+            await self._db.commit()
+        except Exception:
+            await self._db.rollback()
+            try:
+                await self._stores[dataset.storage_backend].delete(dataset.hdfs_path)
+            except StorageError:
+                logger.warning("orphan_dataset_file", key=dataset.hdfs_path)
+            raise
+        await self._db.refresh(dataset)
+        return dataset
 
     async def create_dataset(
         self,
@@ -44,37 +69,26 @@ class DatasetService:
         
         file_format = "csv" if filename.endswith(".csv") else "parquet"
         dataset_id = uuid.uuid4()
-        
-        # 2. Upload to HDFS
-        hdfs_path = f"/platform/raw/{dataset_id}.{file_format}"
-        logger.info("uploading_dataset_to_hdfs", dataset_id=str(dataset_id), path=hdfs_path)
-        
-        try:
-            # Read into memory in chunks (or use file.file directly if HDFSService supports it)
-            # For simplicity, assuming HDFSService handles it
-            await self._hdfs.upload_file(file.file, hdfs_path)
-            
-            # 3. Save metadata
-            dataset = Dataset(
+
+        # 2. Store the file (streamed in chunks, never fully in memory)
+        key, size = await self._store_new(dataset_id, file_format, file.file)
+
+        # 3. Save metadata
+        dataset = await self._save(
+            Dataset(
                 id=dataset_id,
                 name=name,
                 description=description,
-                hdfs_path=hdfs_path,
+                storage_backend=self._backend,
+                hdfs_path=key,
                 file_format=file_format,
+                size_bytes=size,
                 created_by=created_by,
-                validation_status="pending"
+                validation_status="pending",
             )
-            
-            self._db.add(dataset)
-            await self._db.commit()
-            await self._db.refresh(dataset)
-            
-            logger.info("dataset_created", dataset_id=str(dataset_id))
-            return dataset
-            
-        except Exception as e:
-            logger.error("dataset_upload_failed", error=str(e))
-            raise
+        )
+        logger.info("dataset_created", dataset_id=str(dataset_id), backend=self._backend, size=size)
+        return dataset
 
     async def create_dataset_from_images(
         self,
@@ -90,11 +104,14 @@ class DatasetService:
         Expected zip layout: ``<label>/<image files>`` (folder name = class).
         Each image is decoded, grayscaled, resized to a square ``image_size``,
         and flattened to columns ``p0 … p{S*S-1}`` plus a numeric ``label``.
-        The result is stored as an ordinary CSV via the same HDFS path the CSV
-        upload uses, so the whole training pipeline downstream is unchanged;
+        The result is stored as an ordinary CSV, like a CSV upload, so the
+        whole training pipeline downstream is unchanged;
         ``schema_json`` records the image shape + columns so the UI can auto-fill.
         """
         from PIL import Image  # imported lazily so the module loads without Pillow
+
+        if len(zip_bytes) > self._max_bytes:
+            raise FileTooLarge(f"The file is larger than the {self._max_bytes} byte limit")
 
         s = max(4, int(image_size))
         exts = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp")
@@ -139,10 +156,9 @@ class DatasetService:
         csv_bytes = buf.getvalue().encode("utf-8")
 
         dataset_id = uuid.uuid4()
-        hdfs_path = f"/platform/raw/{dataset_id}.csv"
-        logger.info("uploading_image_dataset_to_hdfs", dataset_id=str(dataset_id),
-                    path=hdfs_path, images=len(samples), side=s, classes=len(class_names))
-        await self._hdfs.upload_file(io.BytesIO(csv_bytes), hdfs_path)
+        key, size = await self._store_new(dataset_id, "csv", io.BytesIO(csv_bytes))
+        logger.info("image_dataset_stored", dataset_id=str(dataset_id), images=len(samples),
+                    side=s, classes=len(class_names))
 
         schema = {
             "columns": headers,
@@ -152,22 +168,22 @@ class DatasetService:
             "class_names": class_names,
             "image": {"side": s, "channels": 1},
         }
-        dataset = Dataset(
-            id=dataset_id,
-            name=name,
-            description=description,
-            hdfs_path=hdfs_path,
-            file_format="csv",
-            created_by=created_by,
-            row_count=len(samples),
-            column_count=px + 1,
-            size_bytes=len(csv_bytes),
-            schema_json=json.dumps(schema),
-            validation_status="pending",
+        dataset = await self._save(
+            Dataset(
+                id=dataset_id,
+                name=name,
+                description=description,
+                storage_backend=self._backend,
+                hdfs_path=key,
+                file_format="csv",
+                created_by=created_by,
+                row_count=len(samples),
+                column_count=px + 1,
+                size_bytes=size,
+                schema_json=json.dumps(schema),
+                validation_status="pending",
+            )
         )
-        self._db.add(dataset)
-        await self._db.commit()
-        await self._db.refresh(dataset)
         logger.info("image_dataset_created", dataset_id=str(dataset_id))
         return dataset
 
@@ -182,34 +198,54 @@ class DatasetService:
         )
         return result.scalar_one_or_none()
 
-    async def download_dataset(self, dataset_id: uuid.UUID, owner_id: str) -> tuple[bytes, str]:
-        """Fetch the raw file bytes for one of ``owner_id``'s datasets from HDFS.
+    async def download_dataset(
+        self, dataset_id: uuid.UUID, owner_id: str
+    ) -> tuple[AsyncIterator[bytes], str, Optional[int]]:
+        """Stream the raw file of one of ``owner_id``'s datasets.
 
-        Returns (content, file_format). Raises ValidationError if the dataset
-        does not exist or is not owned by ``owner_id`` so the route can
-        translate it into a 404.
+        Returns (chunks, file_format, size). The first chunk is read before
+        returning, so a missing file or an unreachable store is reported as an
+        error rather than as a broken download. Raises ValidationError if the
+        dataset does not exist or is not owned by ``owner_id`` (a 404).
         """
         dataset = await self.get_dataset(dataset_id, owner_id)
         if dataset is None:
             raise ValidationError("Dataset not found")
-        content = await self._hdfs.download_file(dataset.hdfs_path)
-        return content, dataset.file_format
+        store = self._stores[dataset.storage_backend]
+        chunks = store.open(dataset.hdfs_path)
+        try:
+            first = await anext(chunks, b"")
+        except StorageError as exc:
+            if dataset.storage_backend == HDFS and not await store.ready():
+                raise StoreUnavailable(
+                    "This dataset is stored in HDFS, which is not running. Start it with "
+                    "`make up-hdfs`, or move your datasets with `make migrate-datasets`."
+                ) from exc
+            raise
+
+        async def stream() -> AsyncIterator[bytes]:
+            if first:
+                yield first
+            async for chunk in chunks:
+                yield chunk
+
+        return stream(), dataset.file_format, dataset.size_bytes
 
     async def delete_dataset(self, dataset_id: uuid.UUID, owner_id: str) -> bool:
-        """Remove one of ``owner_id``'s datasets: HDFS file (best-effort) and DB row.
+        """Remove one of ``owner_id``'s datasets: its file (best-effort) and DB row.
 
         Returns False if the dataset does not exist or belongs to another
-        owner. HDFS removal failures are logged but do not block deleting the
-        record, so a dataset whose bytes are already gone can still be cleared
-        from the list.
+        owner. A file that cannot be removed (store down, already gone) is
+        logged but does not block deleting the record, so the list can always
+        be cleaned up.
         """
         dataset = await self.get_dataset(dataset_id, owner_id)
         if dataset is None:
             return False
         try:
-            await self._hdfs.delete_file(dataset.hdfs_path)
+            await self._stores[dataset.storage_backend].delete(dataset.hdfs_path)
         except Exception as e:  # best-effort; the DB row is the source of truth for the UI
-            logger.warning("dataset_hdfs_delete_failed", dataset_id=str(dataset_id), error=str(e))
+            logger.warning("dataset_file_delete_failed", dataset_id=str(dataset_id), error=str(e))
         await self._db.delete(dataset)
         await self._db.commit()
         logger.info("dataset_deleted", dataset_id=str(dataset_id))

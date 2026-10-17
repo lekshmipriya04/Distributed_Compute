@@ -58,6 +58,9 @@ _ADDITIVE_COLUMNS: tuple[str, ...] = (
     "ALTER TABLE IF EXISTS training_runs ADD COLUMN IF NOT EXISTS details_json TEXT",
     "ALTER TABLE IF EXISTS training_runs ADD COLUMN IF NOT EXISTS model_code TEXT",
     "ALTER TABLE IF EXISTS training_runs ADD COLUMN IF NOT EXISTS artifact BYTEA",
+    # storage-service: which store holds each dataset file. Rows from before
+    # this column existed were all written to HDFS.
+    "ALTER TABLE IF EXISTS datasets ADD COLUMN IF NOT EXISTS storage_backend VARCHAR(16) NOT NULL DEFAULT 'hdfs'",
 )
 
 

@@ -11,7 +11,12 @@ export interface Dataset {
   id: string;
   name: string;
   description?: string | null;
+  /** Same value as `storage_path`; kept for older servers. */
   hdfs_path: string;
+  /** `local`, or `hdfs` for datasets stored in HDFS. */
+  storage_backend?: string;
+  /** The file's key in its store. */
+  storage_path?: string;
   file_format: string;
   row_count?: number | null;
   column_count?: number | null;

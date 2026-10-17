@@ -49,3 +49,6 @@ frontend/.npm/
 frontend/e2e-results/
 frontend/playwright-report/
 frontend/blob-report/
+
+# make backup
+backups/

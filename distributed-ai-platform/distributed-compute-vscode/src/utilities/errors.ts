@@ -37,11 +37,12 @@ const MESSAGES: Record<ApiErrorKind, string> = {
 };
 
 /**
- * Statuses whose server message describes the user's own request, or (403,
- * 502) a worker the master could not reach or may not contact; the gateway's
- * messages are curated and secret-free.
+ * Statuses whose server message describes the user's own request, (403, 502)
+ * a worker the master could not reach or may not contact, or (503, 507) a
+ * storage problem with its fix; the gateway's messages are curated and
+ * secret-free.
  */
-const USER_FACING = new Set([400, 403, 409, 413, 422, 502]);
+const USER_FACING = new Set([400, 403, 409, 413, 422, 502, 503, 507]);
 
 export function httpStatusToError(status: number, requestId?: string, detail?: string): ApiError {
   const kind = statusToKind(status);

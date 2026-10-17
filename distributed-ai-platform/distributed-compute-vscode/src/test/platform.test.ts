@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   cloneArgs,
   composeInvocation,
@@ -92,10 +94,12 @@ describe('line endings', () => {
 describe('platform download', () => {
   it('clones the tag of the platform release the extension targets', () => {
     expect(PLATFORM_RELEASE).toMatch(/^\d+\.\d+\.\d+$/);
-    expect(platformTag('0.1.0')).toBe('v0.1.0');
-    expect(platformTag('v0.1.0')).toBe('v0.1.0');
-    expect(cloneArgs('0.1.0', '/tmp/p')).toEqual([
-      'clone', '--depth', '1', '--branch', 'v0.1.0',
+    const manifest = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf8'));
+    expect(PLATFORM_RELEASE).toBe(manifest.version); // released together
+    expect(platformTag('2.0.0')).toBe('v2.0.0');
+    expect(platformTag('v2.0.0')).toBe('v2.0.0');
+    expect(cloneArgs('2.0.0', '/tmp/p')).toEqual([
+      'clone', '--depth', '1', '--branch', 'v2.0.0',
       'https://github.com/lekshmipriya04/Distributed_Compute.git', '/tmp/p',
     ]);
     expect(cloneArgs(undefined, '/tmp/p')).not.toContain('--branch');
