@@ -3,7 +3,7 @@
 [![CI](https://github.com/lekshmipriya04/Distributed_Compute/actions/workflows/ci.yml/badge.svg)](https://github.com/lekshmipriya04/Distributed_Compute/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Platform 0.1.0](https://img.shields.io/badge/platform-0.1.0-informational)
-[![VS Code extension](https://img.shields.io/visual-studio-marketplace/v/aaron43210.distributed-compute?label=VS%20Code%20extension)](https://marketplace.visualstudio.com/items?itemName=aaron43210.distributed-compute)
+[![VS Code extension](https://img.shields.io/visual-studio-marketplace/v/aaron43210.distributed-ai-compute?label=VS%20Code%20extension)](https://marketplace.visualstudio.com/items?itemName=aaron43210.distributed-ai-compute)
 
 **Run code and train models on the computers you already have, over plain
 SSH.** Lend a few cores of a lab machine, an old laptop or a server, then run
@@ -46,7 +46,7 @@ You need [Docker](https://www.docker.com/products/docker-desktop/) (Docker
 Desktop on Windows and macOS, Docker Engine or Desktop on Linux).
 
 **From VS Code, with no terminal:** install the
-[**Distributed Compute** extension](https://marketplace.visualstudio.com/items?itemName=aaron43210.distributed-compute)
+[**Distributed AI Compute** extension](https://marketplace.visualstudio.com/items?itemName=aaron43210.distributed-ai-compute)
 and click **Set Up Now** when it asks. It starts Docker if needed,
 downloads the platform, starts it and connects. Then click **Add Compute
 Node**.

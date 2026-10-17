@@ -2,7 +2,7 @@
 
 Release runbook for the platform and web dashboard **0.1.0** (Python
 services, Go gateway, Docker setup, dashboard) and the VS Code extension
-**1.0.1** (`aaron43210.distributed-compute`). Steps are in order; each has a
+**1.0.0** (`aaron43210.distributed-ai-compute`). Steps are in order; each has a
 check that says it worked.
 
 **Versions.** The extension is versioned separately because 1.0.0 is already
@@ -98,23 +98,23 @@ automatic).
    git push origin v0.1.0
    ```
    Check: `git ls-remote --tags origin v0.1.0` shows the tag.
-2. **Build the `.vsix` from the tag**, or take the `distributed-compute-vsix`
+2. **Build the `.vsix` from the tag**, or take the `distributed-ai-compute-vsix`
    artifact from that commit's CI run. Always use `npm run package`: it points
    the README's images and links at
    `…/raw/main/distributed-ai-platform/distributed-compute-vscode/`, so the
    images must already be on `main` (step 2.1).
    ```bash
    cd distributed-ai-platform/distributed-compute-vscode
-   npm ci && npm run package -- --out distributed-compute-1.0.1.vsix
+   npm ci && npm run package -- --out distributed-ai-compute-1.0.0.vsix
    ```
 3. **Publish.**
    ```bash
-   npx vsce publish --packagePath distributed-compute-1.0.1.vsix -p "$VSCE_PAT"
-   npx ovsx publish distributed-compute-1.0.1.vsix -p "$OVSX_PAT"   # optional
+   npx vsce publish --packagePath distributed-ai-compute-1.0.0.vsix -p "$VSCE_PAT"
+   npx ovsx publish distributed-ai-compute-1.0.0.vsix -p "$OVSX_PAT"   # optional
    ```
    Check: within minutes the listing at
-   `https://marketplace.visualstudio.com/items?itemName=aaron43210.distributed-compute`
-   shows version 1.0.1 and every screenshot loads.
+   `https://marketplace.visualstudio.com/items?itemName=aaron43210.distributed-ai-compute`
+   shows version 1.0.0 and every screenshot loads.
 4. **GitHub Release** for `v0.1.0`: attach the extension's 1.0.1 `.vsix`, paste the 1.0.1
    section of the extension's `CHANGELOG.md`, add screenshots from `frontend/docs/images/` and the extension's `media/readme/`, and list
    the known limits from section 7.

@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vscode = require('vscode');
 
-const ID = 'aaron43210.distributed-compute';
+const ID = 'aaron43210.distributed-ai-compute';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function step(name, fn) {

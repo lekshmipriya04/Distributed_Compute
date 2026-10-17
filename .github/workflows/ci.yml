@@ -125,7 +125,7 @@ jobs:
         npm ci
         npm run lint
         npm test
-        npm run package -- --out distributed-compute.vsix
+        npm run package -- --out distributed-ai-compute.vsix
 
     - name: Smoke test in VS Code (Linux)
       if: runner.os == 'Linux'
@@ -139,8 +139,8 @@ jobs:
       if: runner.os == 'Linux'
       uses: actions/upload-artifact@v4
       with:
-        name: distributed-compute-vsix
-        path: distributed-ai-platform/distributed-compute-vscode/distributed-compute.vsix
+        name: distributed-ai-compute-vsix
+        path: distributed-ai-platform/distributed-compute-vscode/distributed-ai-compute.vsix
 
   # The whole platform in Docker with the two test SSH workers: three users on
   # three gateway ports and three dashboard ports, VS Code and five browsers.

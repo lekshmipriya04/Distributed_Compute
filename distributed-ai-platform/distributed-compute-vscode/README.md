@@ -1,4 +1,4 @@
-# Distributed Compute for VS Code
+# Distributed AI Compute for VS Code
 
 **Run your code and train models on the computers you already have, from VS
 Code.** Lend a few cores of a lab machine, an old laptop or a server, then run
