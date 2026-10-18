@@ -13,6 +13,7 @@ import { GatewayApi } from '../src/api/gateway';
 import { ApiError } from '../src/models/http';
 import { isTerminal, type Execution, type ExecutionStatus } from '../src/models/execution';
 import { formatTaskLog } from '../src/models/onboarding';
+import { createTarGz, readTarGz, sha256Hex, type TarEntry } from '../src/models/project';
 
 const env = process.env;
 const URLS = {
@@ -316,6 +317,127 @@ describe('training', () => {
     await alice.deleteTrainingRun(run.id);
     await expectApiError(alice.getTrainingRun(run.id), 404);
   }, 360_000);
+});
+
+describe('projects (a folder with modules, requirements and outputs)', () => {
+  const file = (path: string, text: string): TarEntry => ({ path, data: Buffer.from(text) });
+  const PROJECT = [
+    file('train.py', [
+      'import json, os, sys',
+      'from tabulate import tabulate',
+      'from lib.scale import scale',
+      'lr = float(sys.stdin.read().strip() or "0.1")',
+      'rows = [r.split(",") for r in open(os.path.join(os.environ["DC_DATA_DIR"], "points.csv")).read().split()[1:]]',
+      'loss = sum((float(y) - scale(float(x), lr)) ** 2 for x, y in rows)',
+      'os.makedirs(os.environ["DC_OUTPUT_DIR"], exist_ok=True)',
+      'json.dump({"lr": lr, "loss": round(loss, 4), "task": os.environ["DC_TASK_INDEX"]},',
+      '          open(os.path.join(os.environ["DC_OUTPUT_DIR"], "metrics.json"), "w"))',
+      'open(os.path.join(os.environ["DC_OUTPUT_DIR"], "model.bin"), "wb").write(bytes(range(256)))',
+      'print(tabulate([["lr", lr], ["loss", round(loss, 4)]]))',
+    ].join('\n') + '\n'),
+    file('lib/__init__.py', ''),
+    file('lib/scale.py', 'def scale(x, lr):\n    return x * lr * 10\n'),
+    file('requirements.txt', 'tabulate==0.9.0\n'),
+  ];
+  const archive = createTarGz(PROJECT);
+  const bundleId = sha256Hex(archive);
+  let dataset = '';
+  let runId = '';
+
+  it('uploads the folder once, privately', async () => {
+    expect(await alice.hasBundle(bundleId)).toBe(false);
+    expect((await alice.uploadBundle(archive)).id).toBe(bundleId);
+    expect(await alice.hasBundle(bundleId)).toBe(true);
+    // Another user, on another port, cannot see or run it.
+    expect(await bob.hasBundle(bundleId)).toBe(false);
+    await expectApiError(
+      bob.createExecution({ runtime: 'project', project: { bundleId, command: 'python3 train.py' } }, `steal-${RUN}`),
+      400,
+      /Unknown bundle_id/,
+    );
+    const csv = 'x,y\n1,1\n2,2\n3,3\n';
+    dataset = (await alice.uploadDataset(`points-${RUN}`, 'points.csv', Buffer.from(csv))).id;
+  }, 120_000);
+
+  it('runs the folder once per input, with its requirements and a dataset, and brings back outputs', async () => {
+    const exec = await alice.createExecution(
+      {
+        runtime: 'project',
+        inputs: ['0.1', '0.05', '0.2'],
+        project: {
+          bundleId,
+          command: 'python3 train.py',
+          requirements: 'requirements.txt',
+          datasets: [{ datasetId: dataset, path: 'data/points.csv' }],
+        },
+      },
+      `project-${RUN}`,
+    );
+    runId = exec.id;
+    expect(exec.runtime).toBe('project');
+    expect(exec.project?.command).toBe('python3 train.py');
+    const done = await waitFor(`project ${exec.id}`, () => alice.getExecution(exec.id), (e) => isTerminal(e.status), 600_000);
+    const tasks = await alice.executionTasks(exec.id);
+    expect(done.status, formatTaskLog(tasks)).toBe('completed');
+    for (const t of tasks.tasks) {
+      expect(t.stdout).toMatch(/lr\s+0\.\d+/);
+      expect(t.stderr).toMatch(/\[dc\] environment: built with (pip|uv)/);
+      expect(t.output_files).toBe(2);
+      const out = readTarGz(await alice.downloadTaskOutputs(exec.id, t.id));
+      expect(out.map((e) => e.path).sort()).toEqual(['outputs/metrics.json', 'outputs/model.bin']);
+      const metrics = JSON.parse(Buffer.from(out.find((e) => e.path === 'outputs/metrics.json')!.data).toString());
+      expect(metrics.lr).toBe(Number(['0.1', '0.05', '0.2'][t.seq]));
+      expect(metrics.task).toBe(String(t.seq));
+      expect([...out.find((e) => e.path === 'outputs/model.bin')!.data].length).toBe(256);
+    }
+    // Bob, and the local user on the default port, see nothing of it.
+    await expectApiError(bob.executionTasks(exec.id), 404);
+    await expectApiError(bob.downloadTaskOutputs(exec.id, tasks.tasks[0].id), 404);
+    expect((await dev.listExecutions()).items.map((e) => e.id)).not.toContain(exec.id);
+  }, 660_000);
+
+  it('reuses a cached environment when the node lends a cache', async () => {
+    expect((await alice.updateNodeSlice(aliceNode, { envCacheGb: 5 })).envCacheGb).toBe(5);
+    const run = async (tag: string) => {
+      const e = await alice.createExecution(
+        { runtime: 'project', nodeIds: [aliceNode], project: { bundleId, command: 'python3 -c "import tabulate; print(tabulate.__version__)"', requirements: 'requirements.txt', outputs: [] } },
+        `cache-${tag}-${RUN}`,
+      );
+      await waitFor(`cache run ${tag}`, () => alice.getExecution(e.id), (x) => isTerminal(x.status), 600_000);
+      return (await alice.executionTasks(e.id)).tasks[0];
+    };
+    const first = await run('1');
+    expect(first.status, first.stderr ?? '').toBe('completed');
+    expect(first.stderr).toMatch(/cached on this node/);
+    const second = await run('2');
+    expect(second.stdout?.trim()).toBe('0.9.0');
+    expect(second.stderr).toMatch(/reused the cached one/);
+  }, 900_000);
+
+  it('reports a broken requirements file as a task failure with pip’s message', async () => {
+    const bad = createTarGz([...PROJECT.filter((f) => f.path !== 'requirements.txt'),
+      file('requirements.txt', 'this-package-does-not-exist-dc-e2e==1.0\n')]);
+    await alice.uploadBundle(bad);
+    const e = await alice.createExecution(
+      { runtime: 'project', project: { bundleId: sha256Hex(bad), command: 'python3 train.py', requirements: 'requirements.txt' } },
+      `badreq-${RUN}`,
+    );
+    const done = await waitFor('bad requirements', () => alice.getExecution(e.id), (x) => isTerminal(x.status), 600_000);
+    const t = (await alice.executionTasks(e.id)).tasks[0];
+    // The task failed; the batch itself ran, so it ends "completed with errors".
+    expect(done.status).toBe('completed_with_errors');
+    expect(done.failed).toBe(1);
+    expect(t.stderr).toMatch(/\[dc\] Building the environment failed/);
+    expect(t.stderr).toMatch(/this-package-does-not-exist-dc-e2e/);
+    expect(t.attempts, 'a broken requirements file is not a node failure').toBe(1);
+  }, 660_000);
+
+  it('runs a project again with Retry', async () => {
+    const again = await alice.retryExecution(runId, false);
+    const done = await waitFor('project retry', () => alice.getExecution(again.id), (x) => isTerminal(x.status), 600_000);
+    expect(done.status).toBe('completed');
+    expect(done.project?.bundleId).toBe(bundleId);
+  }, 660_000);
 });
 
 describe('removal', () => {

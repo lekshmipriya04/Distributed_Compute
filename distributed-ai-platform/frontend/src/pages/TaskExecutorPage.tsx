@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Code2, Play, Server, Cpu, Square, History, RefreshCw, Loader2, RotateCcw } from 'lucide-react';
+import { Code2, Play, Server, Cpu, Square, History, RefreshCw, Loader2, RotateCcw, FolderOpen, Download } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { Card, SectionTitle, PrimaryButton, SecondaryButton, StatusBadge, NumberField } from '../components/common/Primitives';
 import { ApiError, errorMessage } from '../api/client';
@@ -18,6 +18,7 @@ import {
   type NodeResponse,
   type RuntimeInfo,
 } from '../api/ssh';
+import { formatBytes, guessCommand, packFiles, selectFiles } from '../api/project';
 
 const FILENAME_RE = /^[A-Za-z0-9._-]{1,128}$/;
 const INPUT_CLS =
@@ -45,6 +46,15 @@ export function TaskExecutorPage() {
   const [cpuPerTask, setCpuPerTask] = useState(1);
   const [executionPolicy, setExecutionPolicy] = useState<ExecutionPolicy>('safe_background');
   const [timeoutText, setTimeoutText] = useState('');
+
+  // Project mode: run a whole folder (its modules, configs and requirements).
+  const [mode, setMode] = useState<'code' | 'project'>('code');
+  const [projectFiles, setProjectFiles] = useState<{ file: File; path: string }[]>([]);
+  const [folderName, setFolderName] = useState('');
+  const [projectCommand, setProjectCommand] = useState('');
+  const [requirements, setRequirements] = useState('');
+  const [outputsText, setOutputsText] = useState('outputs');
+  const isProject = mode === 'project';
 
   const [submitting, setSubmitting] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -107,12 +117,17 @@ export function TaskExecutorPage() {
   // user's own toolchain, so any online worker qualifies when the server does
   // not narrow it down.
   const eligibleIds = useMemo(() => {
+    if (isProject) {
+      // Projects need python3 for the helper, on Linux or macOS.
+      const py = new Set((runtimes.find((r) => r.id === 'python')?.available_node_ids ?? []).map(String));
+      return new Set(onlineNodes.filter((n) => py.has(n.id) && n.os_type !== 'windows').map((n) => n.id));
+    }
     if (!runtime) return new Set<string>();
     if (runtime.id === 'custom' && runtime.available_node_ids.length === 0) {
       return new Set(onlineNodes.map((n) => n.id));
     }
     return new Set(runtime.available_node_ids.map(String));
-  }, [runtime, onlineNodes]);
+  }, [runtime, onlineNodes, isProject, runtimes]);
 
   // Drop selections that cannot run the newly chosen language.
   useEffect(() => {
@@ -152,7 +167,17 @@ export function TaskExecutorPage() {
     timeoutValue !== null && (!Number.isInteger(timeoutValue) || timeoutValue < 1) ? 'Whole seconds, at least 1' : null;
   const targetIds = selected.length ? selected : [...eligibleIds];
 
-  const blocker = !runtime
+  const blocker = isProject
+    ? projectFiles.length === 0
+      ? 'Choose the project folder.'
+      : !projectCommand.trim()
+        ? 'Enter the command to run in the folder.'
+        : timeoutError
+          ? 'Fix the highlighted fields.'
+          : targetIds.length === 0
+            ? 'No online Linux or macOS worker has python3.'
+            : null
+    : !runtime
     ? 'Choose a language.'
     : !code.trim()
       ? 'Code is required.'
@@ -165,8 +190,53 @@ export function TaskExecutorPage() {
   const running = batch !== null && !isTerminal(batch.batch.status);
   const unfinished = batch ? batch.batch.failed + (batch.batch.cancelled ?? 0) : 0;
 
+  const chooseFolder = (list: FileList | null) => {
+    if (!list || list.length === 0) return;
+    const picked = selectFiles(list);
+    setProjectFiles(picked);
+    setFolderName(list[0].webkitRelativePath.split('/')[0] || 'folder');
+    const paths = picked.map((p) => p.path);
+    setProjectCommand((cur) => cur || guessCommand(paths));
+    setRequirements(paths.includes('requirements.txt') ? 'requirements.txt' : '');
+  };
+
+  const handleSubmitProject = async () => {
+    const inputs = inputsText.split('\n').map((s) => s.trim()).filter(Boolean);
+    setSubmitting(true);
+    try {
+      const { archive } = await packFiles(projectFiles);
+      const bundle = await sshApi.uploadBundle(archive);
+      const outputs = outputsText.split(',').map((o) => o.trim()).filter(Boolean);
+      const created = await sshApi.createBatch({
+        code: '',
+        inputs: inputs.length ? inputs : [''],
+        node_ids: targetIds,
+        runtime: 'project',
+        cpu_per_task: cpuPerTask,
+        timeout_seconds: timeoutValue,
+        execution_policy: executionPolicy,
+        project: {
+          bundle_id: bundle.id,
+          command: projectCommand.trim(),
+          requirements: requirements.trim() || null,
+          outputs: outputs.length ? outputs : ['outputs'],
+        },
+      });
+      setBatch({ batch: created, tasks: [] });
+      setSearchParams({ batch: created.id });
+      showSuccess(`Project started (${created.total} task${created.total === 1 ? '' : 's'})`);
+      loadRecent();
+    } catch (e) {
+      showError(errorMessage(e, 'Could not start the project'));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleSubmit = async () => {
-    if (blocker || !runtime) return;
+    if (blocker) return;
+    if (isProject) return handleSubmitProject();
+    if (!runtime) return;
     const inputs = inputsText.split('\n').map((s) => s.trim()).filter(Boolean);
     const body: BatchCreateRequest = {
       code,
@@ -263,15 +333,87 @@ export function TaskExecutorPage() {
     <div className="w-full max-w-4xl mx-auto space-y-6">
       {/* Language ---------------------------------------------------------- */}
       <Card>
-        <div className="flex items-center gap-2 mb-1">
-          <Code2 size={18} className="text-blue-600" />
-          <SectionTitle>Language</SectionTitle>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
+          <div className="flex items-center gap-2">
+            {isProject ? <FolderOpen size={18} className="text-blue-600" /> : <Code2 size={18} className="text-blue-600" />}
+            <SectionTitle>{isProject ? 'Project folder' : 'Language'}</SectionTitle>
+          </div>
+          <div className="inline-flex rounded-lg border border-slate-300 p-0.5 text-sm" role="radiogroup" aria-label="What to run">
+            {(['code', 'project'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                role="radio"
+                aria-checked={mode === m}
+                onClick={() => setMode(m)}
+                className={`px-3 py-1 rounded-md focus:outline-hidden focus:ring-2 focus:ring-blue-500 ${
+                  mode === m ? 'bg-blue-600 text-white' : 'text-slate-700 hover:text-blue-700'
+                }`}
+              >
+                {m === 'code' ? 'Single file' : 'Project folder'}
+              </button>
+            ))}
+          </div>
         </div>
         <p className="text-sm text-slate-500 mb-4">
-          Any language already present on your workers can be used; nothing is installed. Each task runs in a throwaway
-          sandbox that is deleted afterwards.
+          {isProject
+            ? 'Send a whole folder (your modules, configs and requirements.txt). Each worker builds the Python environment, runs your command in the folder, and sends back what it writes to the outputs folder.'
+            : 'Any language already present on your workers can be used; nothing is installed. Each task runs in a throwaway sandbox that is deleted afterwards.'}
         </p>
-        {runtimesError ? (
+        {isProject ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="sm:col-span-2">
+              <label className="inline-flex items-center gap-2 cursor-pointer rounded-lg border border-dashed border-slate-300 px-4 py-3 text-sm text-slate-700 hover:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500">
+                <FolderOpen size={16} className="text-blue-600" />
+                {projectFiles.length ? 'Choose another folder' : 'Choose the project folder'}
+                <input
+                  type="file"
+                  className="sr-only"
+                  aria-label="Project folder"
+                  data-testid="project-folder"
+                  // @ts-expect-error: non-standard but supported by every current browser
+                  webkitdirectory=""
+                  multiple
+                  onChange={(e) => chooseFolder(e.target.files)}
+                />
+              </label>
+              {projectFiles.length > 0 && (
+                <p className="text-xs text-slate-500 mt-2" data-testid="project-summary">
+                  <span className="font-medium text-slate-700">{folderName}</span> · {projectFiles.length} file
+                  {projectFiles.length === 1 ? '' : 's'} · {formatBytes(projectFiles.reduce((n, f) => n + f.file.size, 0))}
+                  {' '}(.git, caches, virtual environments and outputs/ are left out)
+                </p>
+              )}
+            </div>
+            <label className="text-sm sm:col-span-2">
+              <span className="text-xs text-slate-500 font-medium block mb-1">Command, run inside the folder</span>
+              <input
+                className={`${INPUT_CLS} font-mono`}
+                value={projectCommand}
+                onChange={(e) => setProjectCommand(e.target.value)}
+                placeholder="python3 train.py --epochs 3"
+              />
+            </label>
+            <label className="text-sm">
+              <span className="text-xs text-slate-500 font-medium block mb-1">Requirements file (optional)</span>
+              <input
+                className={`${INPUT_CLS} font-mono`}
+                value={requirements}
+                onChange={(e) => setRequirements(e.target.value)}
+                placeholder="requirements.txt"
+              />
+            </label>
+            <label className="text-sm">
+              <span className="text-xs text-slate-500 font-medium block mb-1">Folders to bring back</span>
+              <input
+                className={`${INPUT_CLS} font-mono`}
+                value={outputsText}
+                onChange={(e) => setOutputsText(e.target.value)}
+                placeholder="outputs"
+              />
+            </label>
+          </div>
+        ) : runtimesError ? (
           <div className="flex items-center gap-3 text-sm text-rose-700">
             {runtimesError}
             <SecondaryButton onClick={loadRuntimes}>Retry</SecondaryButton>
@@ -373,6 +515,12 @@ export function TaskExecutorPage() {
               const reason =
                 n.status !== 'online'
                   ? n.status
+                  : isProject
+                    ? eligible
+                      ? `python ${shortVersion('Python', n.runtimes?.python ?? '')}${n.env_cache_gb ? ` · ${n.env_cache_gb} GB env cache` : ''}`.trim()
+                      : n.os_type === 'windows'
+                        ? 'Windows: not yet'
+                        : 'no python3'
                   : isCustom
                     ? 'uses your command'
                     : version !== undefined
@@ -408,15 +556,17 @@ export function TaskExecutorPage() {
           </div>
         )}
         <p className="text-xs text-slate-500 mt-3">
-          Only workers that have the chosen language can be selected. Leave all unselected to use every eligible worker.
+          {isProject
+            ? 'Projects run on Linux and macOS workers with python3. Leave all unselected to use every eligible worker.'
+            : 'Only workers that have the chosen language can be selected. Leave all unselected to use every eligible worker.'}
         </p>
       </Card>
 
       {/* Code + inputs ------------------------------------------------------ */}
       <Card>
-        <SectionTitle>Code &amp; inputs</SectionTitle>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
+        <SectionTitle>{isProject ? 'Inputs' : 'Code & inputs'}</SectionTitle>
+        <div className={`grid grid-cols-1 gap-4 ${isProject ? '' : 'md:grid-cols-2'}`}>
+          <div className={isProject ? 'hidden' : ''}>
             <label htmlFor="exec-code" className="block text-sm font-medium mb-1 text-slate-700">
               Code {runtime && !isCustom ? <span className="text-slate-500 font-normal font-mono">({runtime.filename})</span> : null}
             </label>
@@ -430,11 +580,16 @@ export function TaskExecutorPage() {
           </div>
           <div>
             <label htmlFor="exec-inputs" className="block text-sm font-medium mb-1 text-slate-700">
-              Inputs <span className="text-slate-500 font-normal">(one line = one task, delivered on stdin and as input.txt)</span>
+              Inputs{' '}
+              <span className="text-slate-500 font-normal">
+                {isProject
+                  ? '(one line = one task, on stdin and in $DC_INPUT_FILE; for example one learning rate per line)'
+                  : '(one line = one task, delivered on stdin and as input.txt)'}
+              </span>
             </label>
             <textarea
               id="exec-inputs"
-              className="w-full border border-slate-300 rounded-lg p-3 font-mono text-sm h-64 outline-hidden focus:ring-2 focus:ring-blue-500"
+              className={`w-full border border-slate-300 rounded-lg p-3 font-mono text-sm outline-hidden focus:ring-2 focus:ring-blue-500 ${isProject ? 'h-32' : 'h-64'}`}
               value={inputsText}
               spellCheck={false}
               onChange={(e) => setInputsText(e.target.value)}
@@ -462,7 +617,7 @@ export function TaskExecutorPage() {
         <div className="mt-5 flex flex-wrap items-center gap-4">
           <PrimaryButton onClick={handleSubmit} disabled={submitting || !!blocker || running}>
             <span className="flex items-center gap-2">
-              <Play size={16} /> {submitting ? 'Submitting…' : 'Run in parallel'}
+              <Play size={16} /> {submitting ? (isProject ? 'Sending the project…' : 'Submitting…') : isProject ? 'Run project' : 'Run in parallel'}
             </span>
           </PrimaryButton>
           {blocker && <span className="text-sm text-slate-500">{blocker}</span>}
@@ -479,7 +634,8 @@ export function TaskExecutorPage() {
               <h3 className="font-semibold text-slate-900">
                 Batch {batch.batch.id.slice(0, 8)}{' '}
                 <span className="text-slate-500 font-normal">
-                  · {batch.batch.runtime} · {executionPolicyLabel(batch.batch.execution_policy)}
+                  · {batch.batch.project ? <span className="font-mono">{batch.batch.project.command}</span> : batch.batch.runtime} ·{' '}
+                  {executionPolicyLabel(batch.batch.execution_policy)}
                 </span>
               </h3>
             </div>
@@ -523,7 +679,22 @@ export function TaskExecutorPage() {
                     {t.attempts > 1 ? ` (attempt ${t.attempts})` : ''}
                     <span className="text-slate-500 font-normal"> · {nodeName(t.node_id)}</span>
                   </span>
-                  <StatusBadge status={t.status} />
+                  <span className="flex items-center gap-2">
+                    {(t.output_files ?? 0) > 0 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          sshApi.downloadTaskOutputs(batch.batch.id, t.id, t.seq).catch((e) => showError(errorMessage(e, 'Download failed')))
+                        }
+                        className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-0.5 text-xs text-slate-700 hover:border-blue-400 hover:text-blue-700"
+                        title="Download what this task wrote to its output folders (.tar.gz)"
+                      >
+                        <Download size={12} /> Outputs ({t.output_files} file{t.output_files === 1 ? '' : 's'}
+                        {t.output_bytes ? `, ${formatBytes(t.output_bytes)}` : ''})
+                      </button>
+                    )}
+                    <StatusBadge status={t.status} />
+                  </span>
                 </div>
                 <SmartLogViewer
                   stdout={t.stdout}
@@ -531,7 +702,7 @@ export function TaskExecutorPage() {
                   exitCode={t.exit_code}
                   status={t.status}
                   durationMs={t.duration_ms}
-                  label={batch.batch.runtime}
+                  label={batch.batch.project ? 'project' : batch.batch.runtime}
                 />
               </div>
             ))}
@@ -564,7 +735,7 @@ export function TaskExecutorPage() {
                 }`}
               >
                 <span className="font-mono text-slate-700">{b.id.slice(0, 8)}</span>
-                <span className="text-slate-500">{b.runtime}</span>
+                <span className="text-slate-500 truncate max-w-xs">{b.project ? b.project.command : b.runtime}</span>
                 <span className="text-slate-500">
                   {b.completed}/{b.total} done{b.failed ? ` · ${b.failed} failed` : ''}
                 </span>

@@ -6,7 +6,10 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { ORIGINS, WORKER, WORKER_2, addWorkerViaApi, jwt, removeAllWorkers } from '../helpers';
+import { ORIGINS, WORKER, WORKER_2, addWorkerViaApi, api, jwt, removeAllWorkers } from '../helpers';
+
+/** The example the screenshots run: a scikit-learn sweep (examples/sklearn-sweep). */
+const SKLEARN_EXAMPLE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'examples', 'sklearn-sweep');
 
 const OUT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'docs', 'images');
 const USER = 'alice';
@@ -90,6 +93,22 @@ test('dashboard walkthrough screenshots', async ({ page }) => {
     await dismissToasts(page);
     await page.getByTestId('batch-summary').scrollIntoViewIfNeeded();
     await save(page, '11-retry');
+
+    // 4b. Run a whole project folder: scikit-learn, installed on the workers.
+    const { items: workers } = await api<{ items: { id: string; name: string }[] }>(page, 'GET', '/api/v1/ssh/nodes');
+    const first = workers.find((w) => w.name === 'lab-box-1');
+    if (first) await api(page, 'PATCH', `/api/v1/ssh/nodes/${first.id}`, { env_cache_gb: 10 });
+    await page.goto(`${origin}/execute`);
+    await page.getByRole('radio', { name: 'Project folder' }).click();
+    await page.getByTestId('project-folder').setInputFiles(SKLEARN_EXAMPLE);
+    await expect(page.getByTestId('project-summary')).toContainText('sklearn-sweep');
+    await page.getByLabel(/^Inputs/).fill('0.1\n1\n10');
+    await save(page, '17-project-folder');
+    await page.getByRole('button', { name: 'Run project' }).click();
+    await expect(page.getByTestId('batch-summary')).toHaveText(/3\/3 done · 0 failed/, { timeout: 480_000 });
+    await dismissToasts(page);
+    await page.getByTestId('batch-summary').evaluate((el) => el.closest('.rounded-2xl')?.scrollIntoView({ block: 'start' }));
+    await save(page, '18-project-results');
 
     // 5. Train a model.
     await page.goto(`${origin}/train`);

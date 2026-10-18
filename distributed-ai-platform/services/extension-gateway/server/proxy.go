@@ -99,8 +99,10 @@ type proxyRoute struct {
 func sshPath(path string) func(*Proxy, *http.Request) (string, bool) {
 	return func(p *Proxy, r *http.Request) (string, bool) {
 		resolved := path
-		if id := r.PathValue("id"); id != "" {
-			resolved = strings.Replace(resolved, "{id}", url.PathEscape(id), 1)
+		for _, name := range []string{"id", "taskId"} {
+			if v := r.PathValue(name); v != "" {
+				resolved = strings.Replace(resolved, "{"+name+"}", url.PathEscape(v), 1)
+			}
 		}
 		return p.ssh + resolved, true
 	}
@@ -131,6 +133,11 @@ var proxyRoutes = []proxyRoute{
 	// Per-task output of an execution, and running it again.
 	{pattern: "GET /executions/{id}/tasks", target: sshPath("/batches/{id}/tasks")},
 	{pattern: "POST /executions/{id}/retry", target: sshPath("/batches/{id}/retry")},
+	// Projects: upload the folder once (.tar.gz, id = sha256), check whether
+	// it is already there, and download what a task wrote to its outputs.
+	{pattern: "POST /bundles", target: sshPath("/bundles"), transfer: true, upload: true},
+	{pattern: "GET /bundles/{id}", target: sshPath("/bundles/{id}")},
+	{pattern: "GET /executions/{id}/tasks/{taskId}/outputs", target: sshPath("/batches/{id}/tasks/{taskId}/outputs"), transfer: true},
 	{pattern: "GET /engines", target: sshPath("/engines")},
 	{pattern: "GET /engines/spark-ray/models", target: sshPath("/engines/spark_ray/models")},
 	{pattern: "GET /training", target: sshPath("/train")},

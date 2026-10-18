@@ -110,7 +110,8 @@ func (s *Server) handleUpdateNodeSlice(w http.ResponseWriter, r *http.Request) {
 func validateNodeSliceRequest(req NodeSliceRequest) (code, msg string) {
 	switch {
 	case req.CPUAllocatable == nil && req.MemoryAllocatableGB == nil &&
-		req.GPUAllocatableCount == nil && req.GPUMemoryAllocatableGB == nil && req.Status == nil:
+		req.GPUAllocatableCount == nil && req.GPUMemoryAllocatableGB == nil && req.Status == nil &&
+		req.EnvCacheGB == nil:
 		return "invalid_slice", "at least one slice field is required"
 	case req.Status != nil && *req.Status != "online" && *req.Status != "draining":
 		return "invalid_status", "status must be online or draining"
@@ -122,6 +123,8 @@ func validateNodeSliceRequest(req NodeSliceRequest) (code, msg string) {
 		return "invalid_gpu", "gpuAllocatableCount must be >= 0"
 	case req.GPUMemoryAllocatableGB != nil && *req.GPUMemoryAllocatableGB < 0:
 		return "invalid_gpu", "gpuMemoryAllocatableGb must be >= 0"
+	case req.EnvCacheGB != nil && (*req.EnvCacheGB < 0 || *req.EnvCacheGB > 10000):
+		return "invalid_env_cache", "envCacheGb must be between 0 and 10000"
 	}
 	return "", ""
 }
@@ -150,7 +153,12 @@ func (s *Server) handleListRuntimes(w http.ResponseWriter, r *http.Request) {
 // runtimes not detected on any selected node (surfaced as 400 with its detail).
 func validateExecutionRequest(req *ExecutionRequest) (code, msg string) {
 	req.Runtime = strings.TrimSpace(req.Runtime)
+	if req.Project != nil {
+		return validateProject(req)
+	}
 	switch {
+	case req.Runtime == "project":
+		return "invalid_project", "runtime project needs a project (bundleId and command)"
 	case !runtimeIDPattern.MatchString(req.Runtime):
 		return "invalid_runtime", "runtime must be a runtime id from GET /runtimes (e.g. python, bash, node, go, custom)"
 	case strings.TrimSpace(req.Code) == "":
@@ -177,5 +185,36 @@ func validateExecutionRequest(req *ExecutionRequest) (code, msg string) {
 	} else if req.CustomCommand != "" || req.CustomFilename != "" {
 		return "invalid_custom_command", "customCommand/customFilename are only allowed with runtime custom"
 	}
+	return "", ""
+}
+
+var bundleIDPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// validateProject checks the parts the gateway can; paths are checked by
+// ssh-executor, which owns the rules.
+func validateProject(req *ExecutionRequest) (code, msg string) {
+	p := req.Project
+	switch {
+	case req.Runtime != "" && req.Runtime != "project":
+		return "invalid_project", "runtime must be project (or omitted) when a project is given"
+	case !bundleIDPattern.MatchString(p.BundleID):
+		return "invalid_project", "project.bundleId must be the sha256 returned by POST /bundles"
+	case strings.TrimSpace(p.Command) == "":
+		return "invalid_project", "project.command must not be empty"
+	case req.CustomCommand != "" || req.CustomFilename != "":
+		return "invalid_custom_command", "customCommand/customFilename are only allowed with runtime custom"
+	case req.CPUPerTask < 0:
+		return "invalid_cpu", "cpuPerTask must be >= 1 (or omitted)"
+	case req.TimeoutSeconds < 0:
+		return "invalid_timeout", "timeoutSeconds must be >= 1 (or omitted)"
+	case req.ExecutionPolicy != "" && !executionPolicies[req.ExecutionPolicy]:
+		return "invalid_execution_policy", "executionPolicy must be safe_background, balanced or max_available"
+	}
+	for _, d := range p.Datasets {
+		if strings.TrimSpace(d.DatasetID) == "" {
+			return "invalid_project", "project.datasets[].datasetId must not be empty"
+		}
+	}
+	req.Runtime = "project"
 	return "", ""
 }

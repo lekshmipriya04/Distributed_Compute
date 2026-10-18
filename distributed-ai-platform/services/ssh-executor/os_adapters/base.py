@@ -350,12 +350,16 @@ class OSAdapter(ABC):
         custom_command: Optional[str],
         execution_id: str,
         max_output_bytes: int,
+        command_override: Optional[str] = None,
+        extra_env: Optional[dict[str, str]] = None,
     ) -> str:
         """The full launch: run ``runtime`` on ``filename`` inside ``sandbox``.
 
         The command must run the task with a clean environment rooted in the
         sandbox, confine it (priority, optional CPU pinning, wall-clock
         timeout), attach stdin, and propagate stdout/stderr.
+        ``command_override`` replaces the runtime's command (projects run their
+        own command); ``extra_env`` is added to the task's environment.
         """
 
     @abstractmethod
@@ -486,6 +490,8 @@ class PosixSandboxMixin:
         custom_command: Optional[str],
         execution_id: str,
         max_output_bytes: int = 1_000_000,
+        command_override: Optional[str] = None,
+        extra_env: Optional[dict[str, str]] = None,
     ) -> str:
         """Run the runtime's command through the sandbox runner.
 
@@ -495,7 +501,9 @@ class PosixSandboxMixin:
         """
         from runtimes import build_run_command
 
-        if gpu_preamble_applies(runtime, spec):
+        if command_override is not None:
+            inner = command_override
+        elif gpu_preamble_applies(runtime, spec):
             # -I drops PYTHONPATH/sitecustomize, so the preamble is the script
             # python runs; it then runs the task file via runpy.
             tool = runtime.tool_names[0] if getattr(runtime, "tool_names", None) else "python3"
@@ -507,9 +515,9 @@ class PosixSandboxMixin:
         # nice wraps a shell so compound commands (build && run) are all niced.
         inner = f"nice -n {int(nice)} /bin/sh -c {shlex.quote(inner)}"
         inner = self._pin_cores(inner, spec)
-        env_json = _json_dumps(
-            _env_for(runtime, sandbox, env_path, spec.timeout_seconds, spec)
-        )
+        env = _env_for(runtime, sandbox, env_path, spec.timeout_seconds, spec)
+        env.update(extra_env or {})
+        env_json = _json_dumps(env)
         runner = f"{sandbox.rstrip('/')}/{RUNNER_FILENAME}"
         return (
             f"{shlex.quote(self.python_command())} {shlex.quote(runner)} "
@@ -615,6 +623,8 @@ class WindowsSandboxMixin:
         custom_command: Optional[str],
         execution_id: str,
         max_output_bytes: int = 1_000_000,
+        command_override: Optional[str] = None,
+        extra_env: Optional[dict[str, str]] = None,
     ) -> str:
         from runtimes import build_run_command
 

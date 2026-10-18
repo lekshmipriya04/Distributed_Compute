@@ -4,6 +4,7 @@
 // read/write and user confirmation.
 
 import { RUNTIMES, isRuntime, type Runtime } from '../models/execution';
+import { validateProjectBlock, type ProjectBlock } from '../models/project';
 
 export type Placement = 'spread' | 'pack' | 'balanced' | 'gpu_first' | 'memory_first';
 
@@ -25,6 +26,8 @@ export interface DistributedConfig {
   execution?: { timeoutSeconds?: number; maxRetries?: number; placement?: Placement };
   output?: string;
   training?: TrainingConfig;
+  /** Run the whole folder ("Run Project on Workers"). */
+  project?: ProjectBlock;
 }
 
 /** Saved answers of the training wizard; "Run Again" submits them as is. */
@@ -163,10 +166,12 @@ export function validateConfig(value: unknown): ValidationResult {
   if (typeof c.name !== 'string' || c.name.trim() === '') {
     errors.push('"name" is required and must be a non-empty string.');
   }
-  if (typeof c.entrypoint !== 'string' || !isSafeRelativePath(c.entrypoint)) {
+  // A project config needs only its "project" block; a file config needs these.
+  const fileRun = c.project === undefined || c.entrypoint !== undefined || c.runtime !== undefined;
+  if (fileRun && (typeof c.entrypoint !== 'string' || !isSafeRelativePath(c.entrypoint))) {
     errors.push('"entrypoint" must be a workspace-relative path inside the project.');
   }
-  if (!isRuntime(c.runtime)) {
+  if (fileRun && !isRuntime(c.runtime)) {
     errors.push(`"runtime" must be a runtime id from GET /runtimes (e.g. ${RUNTIMES.join(', ')}).`);
   }
   for (const key of ['dataset', 'output'] as const) {
@@ -202,6 +207,9 @@ export function validateConfig(value: unknown): ValidationResult {
 
   if (c.training !== undefined) {
     errors.push(...validateTraining(c.training));
+  }
+  if (c.project !== undefined) {
+    errors.push(...validateProjectBlock(c.project));
   }
 
   return { ok: errors.length === 0, errors };

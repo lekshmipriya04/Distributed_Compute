@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "name": "sklearn-sweep",
+  "project": {
+    "command": "python3 train.py",
+    "requirements": "requirements.txt",
+    "outputs": ["outputs"]
+  }
+}

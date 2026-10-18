@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 
 class _CapabilityFields(BaseModel):
@@ -131,6 +131,8 @@ class NodeUpdateRequest(BaseModel):
     allocated_memory_gb: Optional[float] = Field(default=None, ge=0.0)
     allocated_gpu_count: Optional[int] = Field(default=None, ge=0)
     allocated_gpu_memory_gb: Optional[float] = Field(default=None, ge=0.0)
+    # Disk lent for cached project environments (0 turns the cache off).
+    env_cache_gb: Optional[float] = Field(default=None, ge=0.0, le=10_000)
 
 
 class NodeResponse(_CapabilityFields):
@@ -150,6 +152,7 @@ class NodeResponse(_CapabilityFields):
     allocated_gpu_memory_gb: float = 0.0
     # allocated_gpu_memory_gb / gpu_memory_gb, clamped 0..1 (0 = no GPU).
     allocated_gpu_fraction: float = 0.0
+    env_cache_gb: float = 0.0
     status: str
     health_status: str = "unknown"
     last_health_check: Optional[datetime] = None
@@ -186,16 +189,71 @@ class RuntimeListResponse(BaseModel):
 
 
 # --- task batches -----------------------------------------------------------
+class ProjectDataset(BaseModel):
+    """A dataset copied into the project folder before the command runs."""
+
+    dataset_id: UUID
+    # Where it goes, relative to the project; default data/<name>.<format>.
+    path: Optional[str] = Field(default=None, max_length=512)
+
+
+class ProjectSpec(BaseModel):
+    """Run a folder of code: the bundle from ``POST /bundles`` and a command.
+
+    ``requirements`` is a pip requirements file inside the project; the worker
+    builds (or reuses) a virtual environment from it. Files written to the
+    ``outputs`` folders are brought back and can be downloaded per task.
+    """
+
+    bundle_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    command: str = Field(min_length=1, max_length=4096)
+    requirements: Optional[str] = Field(default=None, max_length=512)
+    outputs: list[str] = Field(default_factory=lambda: ["outputs"], max_length=20)
+    datasets: list[ProjectDataset] = Field(default_factory=list, max_length=20)
+
+    @field_validator("command")
+    @classmethod
+    def _command_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("command must not be empty")
+        return value
+
+    @field_validator("requirements")
+    @classmethod
+    def _requirements_path(cls, value: Optional[str]) -> Optional[str]:
+        from projects import check_relative_path
+
+        return check_relative_path(value, "requirements") if value else None
+
+    @field_validator("outputs")
+    @classmethod
+    def _output_paths(cls, value: list[str]) -> list[str]:
+        from projects import check_relative_path
+
+        return list(dict.fromkeys(check_relative_path(v, "outputs") for v in value))
+
+    @field_validator("datasets")
+    @classmethod
+    def _dataset_paths(cls, value: list[ProjectDataset]) -> list[ProjectDataset]:
+        from projects import check_relative_path
+
+        for item in value:
+            if item.path:
+                item.path = check_relative_path(item.path, "datasets[].path")
+        return value
+
+
 class BatchCreateRequest(BaseModel):
-    """Code plus one input per task.
+    """Code plus one input per task, or a project plus one input per task.
 
     ``runtime`` is a runtime id from ``GET /runtimes``. ``custom`` runs
     ``custom_command`` (must contain ``{file}``) after writing ``code`` to
     ``custom_filename`` inside the sandbox, so any language whose toolchain is
-    already on the worker can be used.
+    already on the worker can be used. With ``project`` set, ``code`` is not
+    used and the runtime is ``project``.
     """
 
-    code: str
+    code: str = ""
     inputs: list[str] = Field(default_factory=list)
     node_ids: list[UUID] = Field(default_factory=list)
     runtime: str = Field(default="python", min_length=1, max_length=32)
@@ -206,6 +264,15 @@ class BatchCreateRequest(BaseModel):
     execution_policy: str = Field(
         default="safe_background", pattern="^(safe_background|balanced|max_available)$"
     )
+    project: Optional[ProjectSpec] = None
+
+    @model_validator(mode="after")
+    def _project_runtime(self) -> "BatchCreateRequest":
+        if self.project is not None:
+            self.runtime = "project"
+        elif self.runtime == "project":
+            raise ValueError("runtime 'project' needs a project (bundle_id and command)")
+        return self
 
 
 class TaskResponse(BaseModel):
@@ -221,6 +288,10 @@ class TaskResponse(BaseModel):
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     duration_ms: Optional[int] = None
+    # Project runs: files collected from the output folders (download them
+    # from GET /batches/{id}/tasks/{task_id}/outputs when > 0).
+    output_files: Optional[int] = None
+    output_bytes: Optional[int] = None
 
     model_config = {"from_attributes": True}
 
@@ -240,8 +311,26 @@ class BatchResponse(BaseModel):
     execution_policy: str = "safe_background"
     created_at: datetime
     finished_at: Optional[datetime] = None
+    project_json: Optional[str] = Field(default=None, exclude=True)
 
     model_config = {"from_attributes": True}
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def project(self) -> Optional[ProjectSpec]:
+        if not self.project_json:
+            return None
+        try:
+            return ProjectSpec.model_validate_json(self.project_json)
+        except ValueError:
+            return None
+
+
+class BundleResponse(BaseModel):
+    id: str  # sha256 of the archive
+    size_bytes: int
+    files: Optional[int] = None
+    unpacked_bytes: Optional[int] = None
 
 
 class BatchListResponse(BaseModel):

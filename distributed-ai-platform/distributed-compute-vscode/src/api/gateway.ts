@@ -345,6 +345,44 @@ export class GatewayApi {
     return raw.items as Dataset[];
   }
 
+  /** True when this user already uploaded the project archive with that sha256. */
+  async hasBundle(sha256: string, signal?: AbortSignal): Promise<boolean> {
+    try {
+      await this.client.request<unknown>(`/bundles/${encodeURIComponent(sha256)}`, { signal });
+      return true;
+    } catch (err) {
+      if (err instanceof ApiError && err.kind === 'not-found') {
+        return false;
+      }
+      throw err;
+    }
+  }
+
+  /** Upload a project's .tar.gz; its id is its sha256. */
+  async uploadBundle(archive: Uint8Array, signal?: AbortSignal): Promise<{ id: string; sizeBytes: number }> {
+    const response = await this.client.requestRaw('/bundles', {
+      method: 'POST',
+      rawBody: new Blob([archive]),
+      contentType: 'application/gzip',
+      signal,
+      timeoutMs: 30 * 60 * 1000,
+    });
+    const raw = asObject(await response.json(), 'bundle');
+    if (typeof raw.id !== 'string') {
+      badResponse('bundle');
+    }
+    return { id: raw.id, sizeBytes: typeof raw.size_bytes === 'number' ? raw.size_bytes : archive.length };
+  }
+
+  /** What one project task wrote to its output folders, as a .tar.gz. */
+  async downloadTaskOutputs(executionId: string, taskId: string, signal?: AbortSignal): Promise<Uint8Array> {
+    const response = await this.client.requestRaw(
+      `/executions/${encodeURIComponent(executionId)}/tasks/${encodeURIComponent(taskId)}/outputs`,
+      { signal, accept: '*/*', timeoutMs: 30 * 60 * 1000 },
+    );
+    return new Uint8Array(await response.arrayBuffer());
+  }
+
   /** Upload a local file to storage-service via multipart streaming. */
   async uploadDataset(name: string, filename: string, content: Uint8Array, signal?: AbortSignal): Promise<Dataset> {
     const form = new FormData();

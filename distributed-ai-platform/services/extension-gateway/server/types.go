@@ -39,11 +39,13 @@ type ComputeNode struct {
 	GPUFraction            *float64 `json:"gpuFraction,omitempty"`
 	// GPURuntime is the detected GPU runtime (e.g. torch); empty when none was
 	// found, in which case a GPU slice cannot be enforced on the worker.
-	GPURuntime          string            `json:"gpuRuntime,omitempty"`
-	ResourceEnforcement string            `json:"resourceEnforcement,omitempty"` // strict|best_effort
-	Runtimes            map[string]string `json:"runtimes,omitempty"`            // runtime id -> detected version
-	ActiveTasks         int               `json:"activeTasks"`
-	LastHealthCheck     *time.Time        `json:"lastHealthCheck,omitempty"`
+	GPURuntime          string `json:"gpuRuntime,omitempty"`
+	ResourceEnforcement string `json:"resourceEnforcement,omitempty"` // strict|best_effort
+	// EnvCacheGB is the disk lent for cached project environments (0 = off).
+	EnvCacheGB      *float64          `json:"envCacheGb,omitempty"`
+	Runtimes        map[string]string `json:"runtimes,omitempty"` // runtime id -> detected version
+	ActiveTasks     int               `json:"activeTasks"`
+	LastHealthCheck *time.Time        `json:"lastHealthCheck,omitempty"`
 }
 
 // Execution is a submitted execution; it maps 1:1 to an ssh-executor batch
@@ -62,6 +64,25 @@ type Execution struct {
 	TimeoutSeconds int        `json:"timeoutSeconds,omitempty"`
 	CreatedAt      time.Time  `json:"createdAt"`
 	EndedAt        *time.Time `json:"endedAt,omitempty"`
+	// Project is set for project runs (runtime "project").
+	Project *ProjectSpec `json:"project,omitempty"`
+}
+
+// ProjectSpec runs a folder: BundleID is the sha256 of the .tar.gz uploaded
+// with POST /bundles, Command runs inside the unpacked folder. It maps onto
+// ssh-executor's ProjectSpec.
+type ProjectSpec struct {
+	BundleID     string           `json:"bundleId"`
+	Command      string           `json:"command"`
+	Requirements string           `json:"requirements,omitempty"` // pip requirements file in the project
+	Outputs      []string         `json:"outputs,omitempty"`      // folders brought back; default ["outputs"]
+	Datasets     []ProjectDataset `json:"datasets,omitempty"`
+}
+
+// ProjectDataset copies a dataset into the project before the command runs.
+type ProjectDataset struct {
+	DatasetID string `json:"datasetId"`
+	Path      string `json:"path,omitempty"` // default data/<name>.<format>
 }
 
 // ExecutionRequest is the body for POST /executions. It maps onto the
@@ -78,6 +99,8 @@ type ExecutionRequest struct {
 	TimeoutSeconds int      `json:"timeoutSeconds,omitempty"`
 	// ExecutionPolicy is safe_background (default) | balanced | max_available.
 	ExecutionPolicy string `json:"executionPolicy,omitempty"`
+	// Project runs a folder instead of Code (runtime is then "project").
+	Project *ProjectSpec `json:"project,omitempty"`
 }
 
 // NodeSliceRequest is the body for PATCH /nodes/{id}: change the resource
@@ -90,6 +113,8 @@ type NodeSliceRequest struct {
 	GPUMemoryAllocatableGB *float64 `json:"gpuMemoryAllocatableGb,omitempty"`
 	// Status "draining" stops new work going to the node; "online" resumes it.
 	Status *string `json:"status,omitempty"`
+	// EnvCacheGB lends disk for cached project environments (0 turns it off).
+	EnvCacheGB *float64 `json:"envCacheGb,omitempty"`
 }
 
 // Runtime is a language runtime the backend knows how to run. A runtime is

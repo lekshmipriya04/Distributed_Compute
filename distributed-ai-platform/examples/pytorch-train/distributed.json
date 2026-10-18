@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "name": "pytorch-train",
+  "project": {
+    "command": "python3 train.py",
+    "requirements": "requirements.txt"
+  }
+}

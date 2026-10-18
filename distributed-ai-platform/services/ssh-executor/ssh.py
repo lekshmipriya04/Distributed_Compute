@@ -229,6 +229,14 @@ class SSHTransport:
         finally:
             sftp.close()
 
+    def fetch(self, remote_path: str, local_path: str) -> None:
+        """Copy a remote file to ``local_path`` (streamed, for large files)."""
+        sftp = self._require_client().open_sftp()
+        try:
+            sftp.get(remote_path, local_path)
+        finally:
+            sftp.close()
+
     def download(self, remote_path: str) -> bytes:
         sftp = self._require_client().open_sftp()
         try:

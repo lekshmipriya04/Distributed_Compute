@@ -1,8 +1,10 @@
 # Distributed Data Processing & Task Execution Platform
 
-> Borrow spare CPU and GPU from your own machines over plain SSH. Run code in
-> any language on them in throwaway sandboxes, and train small models across
-> them. Nothing is installed on the machines that lend the compute.
+> Borrow spare CPU and GPU from your own machines over plain SSH. Run your
+> own projects (a folder with its `requirements.txt`) or code in any language
+> on them in throwaway sandboxes, and train models across them. Nothing is
+> installed on the machines that lend the compute, unless their owner lends an
+> environment cache.
 
 Details: [docs/architecture.md](docs/architecture.md) ·
 [docs/connections.md](docs/connections.md) ·
@@ -13,7 +15,7 @@ Details: [docs/architecture.md](docs/architecture.md) ·
 ## 1. Overview
 
 A **master** (Docker Compose) manages **workers**, which are any machines you
-can reach over SSH that have `python3`. There are three user-facing features:
+can reach over SSH that have `python3`. There are four user-facing features:
 
 1. **Add a worker with a password, once.** Enter host, port, username and
    password, and confirm the host-key fingerprint. The master generates an
@@ -25,7 +27,12 @@ can reach over SSH that have `python3`. There are three user-facing features:
    `custom` command) as a batch, one task per input, in parallel across
    workers. Each task runs in its own sandbox directory, which is deleted
    afterwards. Tasks can be cancelled.
-3. **Training.** Built-in linear regression, logistic regression or a small
+3. **Projects** (2.0). Send a whole folder (modules, configs,
+   `requirements.txt`) and a command. Each worker builds the Python
+   environment (in the sandbox, or cached when the owner lends disk), runs
+   the command once per input, and the files each task writes to `outputs/`
+   come back for download. From VS Code, the dashboard or the `dc` CLI.
+4. **Training.** Built-in linear regression, logistic regression or a small
    CNN, **your own model** (a `model.py` with `train()`), or with the optional
    Spark + Ray engine **any Spark MLlib model**. Built-in and custom models use
    federated averaging: on the master's cores (`single`) or on workers
@@ -60,6 +67,10 @@ executions, submits the active file, and runs and tracks training jobs.
 - Atomic leases, per-slot core pinning (Linux `taskset`), thread caps, GPU
   slicing, execution policies (`safe_background`, `balanced`,
   `max_available`), and a recovery loop.
+- Projects: bundles stored once per owner and hash, environment builds with
+  uv or venv + pip, opt-in per-node environment cache with LRU eviction,
+  datasets copied in, output folders brought back (also after failure or
+  timeout), the `dc` command line, and example projects (`examples/`).
 - Pure-Python distributed training with compute-weighted shards and ONNX
   export.
 - Owner-scoped datasets (local files + Postgres; HDFS optional), CSV/JSON and
@@ -149,6 +160,7 @@ pytest tests -q                         # Python unit tests
 make lint                               # ruff (E9,F) + mypy shared/
 cd frontend && npm run build
 cd distributed-compute-vscode && npm test
+pip install ./clients/cli && dc --help         # command-line client
 cd services/extension-gateway && go test ./...
 ```
 
@@ -166,6 +178,8 @@ distributed-ai-platform/
 │   ├── ssh-executor/         # workers, sandbox executor, batches, training (8011)
 │   └── extension-gateway/    # Go gateway for VS Code (8090)
 ├── shared/                   # auth, config, logging, metrics, DB manager
+├── clients/cli/              # dc, the command-line client (stdlib only)
+├── examples/                 # hello-project, sklearn-sweep, pytorch-train
 ├── frontend/                 # React UI
 ├── distributed-compute-vscode/
 ├── infrastructure/docker/    # postgres init, hadoop config (optional HDFS)

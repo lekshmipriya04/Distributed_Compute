@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, String, Integer, Float, LargeBinary, Text, ForeignKey, func
+from sqlalchemy import BigInteger, DateTime, String, Integer, Float, LargeBinary, Text, ForeignKey, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -82,6 +82,9 @@ class SSHNode(Base):
     execution_backend: Mapped[str] = mapped_column(String(32), nullable=False, default="ssh")
     resource_enforcement: Mapped[str] = mapped_column(String(16), nullable=False, default="best_effort")
     capabilities_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Disk the owner lends for cached project environments in
+    # ~/.cache/distributed-compute (0 = build each environment in the sandbox).
+    env_cache_gb: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
 
     # Master-driven SSH health (no permanent agent)
     health_status: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown")
@@ -204,6 +207,8 @@ class TaskBatch(Base):
     )
     # JSON list of node ids the user restricted the run to (empty = all online).
     node_ids_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Project runs (runtime "project"): JSON of schemas.ProjectSpec.
+    project_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # pending | running | cancelling | cancelled | completed |
     # completed_with_errors | failed
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
@@ -248,6 +253,10 @@ class Task(Base):
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Project runs: files brought back from the output folders (None = none
+    # were collected; the archive is in the output store under the task id).
+    output_files: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    output_bytes: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
 
     batch: Mapped["TaskBatch"] = relationship(lambda: TaskBatch, back_populates="tasks")
 

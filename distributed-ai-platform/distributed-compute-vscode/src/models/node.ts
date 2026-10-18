@@ -35,6 +35,8 @@ export interface ComputeNode {
   /** Detected GPU runtime (e.g. torch); absent when none was found. */
   gpuRuntime?: string;
   resourceEnforcement?: 'strict' | 'best_effort';
+  /** Disk lent for cached project environments, in GB (0 or missing = off). */
+  envCacheGb?: number;
   activeTasks: number;
   lastHealthCheck?: string;
 }
@@ -79,6 +81,8 @@ export interface NodeSliceRequest {
   memoryAllocatableGb?: number;
   gpuAllocatableCount?: number;
   gpuMemoryAllocatableGb?: number;
+  /** Disk lent for cached project environments (0 turns the cache off). */
+  envCacheGb?: number;
 }
 
 function fmtGb(gb: number): string {

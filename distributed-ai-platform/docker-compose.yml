@@ -256,6 +256,9 @@ services:
       - config/.env
     ports:
       - "${BIND_ADDR:-127.0.0.1}:8011:8011"
+    volumes:
+      # Project bundles, dataset copies for projects and task outputs.
+      - project_files:/var/lib/distributed-compute
     networks:
       - platform-net
     restart: unless-stopped
@@ -311,48 +314,36 @@ services:
   # sshd" model. Login: provider / providerpass. NOT for production use.
   # Only started with `docker compose --profile dev up`.
   ssh-provider:
-    image: lscr.io/linuxserver/openssh-server:latest
+    # Debian + Python 3.12 (see infrastructure/docker/ssh-worker): like a
+    # typical Linux PC, so pip finds ready-made wheels for real ML packages.
+    build:
+      context: infrastructure/docker/ssh-worker
+    image: distributed-compute/ssh-worker:dev
     container_name: ssh-provider
     profiles: ["dev"]
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=UTC
-      - USER_NAME=provider
-      - USER_PASSWORD=providerpass
-      - PASSWORD_ACCESS=true
-      - SUDO_ACCESS=false
-      # Install python3 + coreutils (nice/taskset/timeout) at startup so the
-      # master can run tasks and pin them to the allocated cores.
-      - DOCKER_MODS=linuxserver/mods:universal-package-install
-      - INSTALL_PACKAGES=python3|coreutils|util-linux
+    restart: unless-stopped
     networks:
       - platform-net
 
   # Second isolated provider for multi-node SSH training tests. Reachable by
   # ssh-executor as ssh-provider-2:2222; intentionally not published on host.
   ssh-provider-2:
-    image: lscr.io/linuxserver/openssh-server:latest
+    image: distributed-compute/ssh-worker:dev
+    pull_policy: never
     container_name: ssh-provider-2
     profiles: ["dev"]
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=UTC
-      - USER_NAME=provider
-      - USER_PASSWORD=providerpass
-      - PASSWORD_ACCESS=true
-      - SUDO_ACCESS=false
-      - DOCKER_MODS=linuxserver/mods:universal-package-install
-      - INSTALL_PACKAGES=python3|coreutils|util-linux
+    restart: unless-stopped
+    depends_on:
+      - ssh-provider
     networks:
       - platform-net
-
 
 volumes:
   postgres_data:
   # Dataset files (STORAGE_BACKEND=local).
   datasets:
+  # Project bundles and task outputs (ssh-executor).
+  project_files:
   hadoop_namenode:
   hadoop_datanode_1:
   hadoop_datanode_2:

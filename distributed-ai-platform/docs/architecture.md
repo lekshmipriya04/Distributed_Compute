@@ -230,7 +230,29 @@ On Windows, a PowerShell script does the same with `%TEMP%\dp-exec.<id>.<rand>`,
 `Start-Process` and `taskkill /T /F`. It is **unverified on real hardware**,
 and it has no thread or GPU environment yet.
 
-### 5.3 Dispatch
+### 5.3 Projects (a folder instead of a file)
+```
+client: pack the folder (.tar.gz, sorted, no timestamps) → GET /bundles/<sha256>
+        → POST /bundles only when missing → POST /batches {project: {bundle_id, command, …}}
+master: bundle stored at project_files:/bundles/<owner hash>/<sha256>.tar.gz
+per task, in the usual sandbox:
+  upload dc_bundle.tar.gz, datasets, dc_project.py, dp_runner.py, input.txt
+  python3 dc_project.py prepare   unpack into project/ (paths checked), place datasets
+  python3 dc_project.py env       venv from requirements (uv or venv + pip), in the sandbox
+                                  or, with env_cache_gb, cached under ~/.cache/distributed-compute
+  dp_runner.py "cd project && <command>"   (same limits, timeout, cancel as any task)
+  python3 dc_project.py pack      tar the output folders (also after failure or timeout)
+  SFTP get dc_outputs.tar.gz → project_files:/outputs/<task id>.tar.gz
+finally: rm -rf <sandbox>
+```
+`dc_project.py` is standard library only, like the runner. Environment builds
+in the cache are serialised per environment with `flock`, so parallel tasks on
+one node build it once. A failed unpack or build is reported as a failed task
+(exit code set), not as a node failure, so it is not retried elsewhere.
+Projects run on Linux and macOS workers; Windows workers are refused at submit
+time with a clear message.
+
+### 5.4 Dispatch
 `dispatch_batch` selects the owner's online nodes (or the chosen subset) that
 have the runtime. It reserves a lease on each one atomically and fans out with
 `run_across_nodes`. Each node gets `lease.cpu_allocated // cpu_per_task` slots.
@@ -342,8 +364,14 @@ and the grid-search candidates.
   get `storage_backend = 'hdfs'`).
   Columns that the list does not cover need a fresh database (`make reset` drops
   the volumes) or a manual `ALTER`.
+- **Project files** (ssh-executor): the `project_files` volume at
+  `/var/lib/distributed-compute`: `bundles/` (per owner, by hash), `datasets/`
+  (copies sent to project tasks) and `outputs/` (one archive per task;
+  included in `make backup`).
 - **Workers** keep nothing: their sandboxes are deleted, and the only
-  persistent change is one `dp-platform:<id>` line in authorized keys.
+  persistent change is one `dp-platform:<id>` line in authorized keys. The
+  exception is opt-in: a node with an environment cache keeps project
+  environments in `~/.cache/distributed-compute`, removed with the node.
 
 ## 9. Security
 
@@ -439,3 +467,8 @@ full run against the Docker dev providers during this change set.
   `python` runtime and only to torch allocations.
 - Windows support is written but unverified.
 - There is no database migration tool beyond the additive column list.
+- A task runs for at most `max_task_timeout_seconds` (1 hour) and ends if the
+  master restarts while it runs. Tasks of a project are independent: there is
+  no multi-machine launcher (`torchrun`, DeepSpeed) yet.
+- Project environments need `python3 -m venv` (or uv) on the worker, and
+  network access to the package index from the worker.

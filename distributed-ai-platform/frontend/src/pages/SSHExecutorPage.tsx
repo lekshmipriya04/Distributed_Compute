@@ -655,6 +655,7 @@ function NodeRow({
     cpu: node.allocated_cpu,
     mem: node.allocated_memory_gb,
     gpuGb: node.allocated_gpu_memory_gb ?? 0,
+    envCacheGb: node.env_cache_gb ?? 0,
   });
   const [edit, setEdit] = useState(editFromNode);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -708,6 +709,7 @@ function NodeRow({
           allocated_cpu: edit.cpu,
           allocated_memory_gb: edit.mem,
           ...gpuAllocation(node, edit.gpuGb),
+          env_cache_gb: edit.envCacheGb,
         }),
       (n) => `"${n.name}" updated`,
     );
@@ -742,6 +744,7 @@ function NodeRow({
           </div>
           <div className="text-xs text-slate-500 mt-0.5">
             {sliceSummary(node)} · {node.allocated_memory_gb} / {node.detected_memory_gb} GB RAM
+            {node.env_cache_gb ? ` · ${node.env_cache_gb} GB env cache` : ''}
             {' · '}health {node.health_status}
             {node.last_health_check ? ` (${new Date(node.last_health_check).toLocaleString()})` : ''}
           </div>
@@ -865,6 +868,25 @@ function NodeRow({
           <div className="sm:col-span-3">
             <GpuSliceControl caps={node} value={edit.gpuGb} onChange={(gpuGb) => setEdit({ ...edit, gpuGb })} />
           </div>
+          <label className="text-sm sm:col-span-3">
+            <span className="text-xs text-slate-500 font-medium block mb-1">
+              Environment cache for projects: {edit.envCacheGb ? `${edit.envCacheGb} GB` : 'off'}
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={50}
+              step={5}
+              value={edit.envCacheGb}
+              aria-label="Environment cache (GB)"
+              onChange={(e) => setEdit({ ...edit, envCacheGb: parseFloat(e.target.value) })}
+              className="w-full accent-blue-600"
+            />
+            <span className="text-xs text-slate-500 block mt-0.5">
+              Off: each project task builds its Python environment in its sandbox and nothing stays on the machine. On:
+              environments are kept in ~/.cache/distributed-compute for later tasks, and deleted when the worker is removed.
+            </span>
+          </label>
           <div className="sm:col-span-3 flex gap-2">
             <PrimaryButton onClick={saveEdit} disabled={busy !== null}>
               {busy === 'save' ? 'Saving…' : 'Save'}

@@ -55,6 +55,18 @@ export interface Execution {
   message?: string;
   createdAt: string;
   endedAt?: string;
+  /** Set for project runs (runtime "project"). */
+  project?: ProjectSpec;
+}
+
+/** Run a folder: the bundle uploaded with POST /bundles and a command. */
+export interface ProjectSpec {
+  /** sha256 of the project's .tar.gz. */
+  bundleId: string;
+  command: string;
+  requirements?: string;
+  outputs?: string[];
+  datasets?: { datasetId: string; path?: string }[];
 }
 
 export interface ExecutionList {
@@ -78,6 +90,8 @@ export interface ExecutionRequest {
   memoryPerTaskGb?: number;
   timeoutSeconds?: number;
   executionPolicy?: ExecutionPolicy;
+  /** Run a folder instead of `code`; the runtime is then "project". */
+  project?: ProjectSpec;
 }
 
 export type ExecutionPolicy = 'safe_background' | 'balanced' | 'max_available';
@@ -143,8 +157,15 @@ export function isRunnableScheme(scheme: string): boolean {
 }
 
 /** "python · 8 tasks", the readable name of an execution in the views. */
-export function executionLabel(e: Pick<Execution, 'runtime' | 'total'>): string {
-  return `${e.runtime} · ${e.total} task${e.total === 1 ? '' : 's'}`;
+export function executionLabel(e: Pick<Execution, 'runtime' | 'total'> & { project?: ProjectSpec }): string {
+  const what = e.project ? shortCommand(e.project.command) : e.runtime;
+  return `${what} · ${e.total} task${e.total === 1 ? '' : 's'}`;
+}
+
+/** "python train.py --epochs 3" -> at most 40 characters. */
+export function shortCommand(command: string): string {
+  const flat = command.replace(/\s+/g, ' ').trim();
+  return flat.length > 40 ? `${flat.slice(0, 39)}…` : flat;
 }
 
 /** Status bar text: "2/2 nodes online · 1 job running". */

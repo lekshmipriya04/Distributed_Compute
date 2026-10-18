@@ -189,7 +189,7 @@ export function errorMessage(e: unknown, fallback = 'Request failed'): string {
 
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
-  body?: unknown; // JSON-serializable, OR a FormData instance for uploads
+  body?: unknown; // JSON-serializable, OR a FormData/Blob sent as it is (uploads)
   isFormData?: boolean;
 }
 
@@ -202,7 +202,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   const res = await fetch(path, {
     method,
     headers,
-    body: body === undefined ? undefined : isFormData ? (body as FormData) : JSON.stringify(body),
+    body: body === undefined ? undefined : isFormData ? (body as BodyInit) : JSON.stringify(body),
   });
 
   if (!res.ok) {

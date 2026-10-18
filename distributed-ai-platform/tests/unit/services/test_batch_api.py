@@ -51,7 +51,7 @@ def _batch(status="running", owner=OWNER):
     return SimpleNamespace(
         id=uuid.uuid4(), owner_id=owner, runtime="python", status=status, message=None,
         total=2, completed=0, failed=0, cancelled=0, cpu_per_task=1, timeout_seconds=120,
-        created_at=datetime.now(timezone.utc), finished_at=None,
+        created_at=datetime.now(timezone.utc), finished_at=None, project_json=None,
     )
 
 

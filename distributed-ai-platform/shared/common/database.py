@@ -61,6 +61,11 @@ _ADDITIVE_COLUMNS: tuple[str, ...] = (
     # storage-service: which store holds each dataset file. Rows from before
     # this column existed were all written to HDFS.
     "ALTER TABLE IF EXISTS datasets ADD COLUMN IF NOT EXISTS storage_backend VARCHAR(16) NOT NULL DEFAULT 'hdfs'",
+    # ssh-executor: projects (folders with a command, environment and outputs).
+    "ALTER TABLE IF EXISTS task_batches ADD COLUMN IF NOT EXISTS project_json TEXT",
+    "ALTER TABLE IF EXISTS tasks ADD COLUMN IF NOT EXISTS output_files INTEGER",
+    "ALTER TABLE IF EXISTS tasks ADD COLUMN IF NOT EXISTS output_bytes BIGINT",
+    "ALTER TABLE IF EXISTS ssh_nodes ADD COLUMN IF NOT EXISTS env_cache_gb DOUBLE PRECISION NOT NULL DEFAULT 0",
 )
 
 

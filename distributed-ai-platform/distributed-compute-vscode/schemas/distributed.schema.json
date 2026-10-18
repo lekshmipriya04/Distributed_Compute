@@ -6,9 +6,7 @@
   "additionalProperties": false,
   "required": [
     "version",
-    "name",
-    "entrypoint",
-    "runtime"
+    "name"
   ],
   "properties": {
     "version": {
@@ -200,6 +198,76 @@
           }
         }
       ]
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command"
+      ],
+      "description": "Run this folder on the workers ('Run Project on Workers'): its files are packed and sent once, the requirements are installed on each worker, and the output folders come back.",
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Command run inside the folder, e.g. 'python train.py --epochs 3'. Each task's input is on stdin and in $DC_INPUT_FILE."
+        },
+        "requirements": {
+          "type": "string",
+          "minLength": 1,
+          "description": "pip requirements file inside the folder. Default: requirements.txt when it exists."
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Folders brought back after each task. Default ['outputs'] ($DC_OUTPUT_DIR)."
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Extra patterns to leave out, e.g. 'data/raw/' or '*.ckpt'. .git, caches, virtual environments and outputs/ are always left out; in a git repository .gitignore applies too."
+        },
+        "datasets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "dataset"
+            ],
+            "properties": {
+              "dataset": {
+                "type": "string",
+                "minLength": 1,
+                "description": "storage-service dataset id."
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Where it goes in the folder. Default data/<name>.<format> ($DC_DATA_DIR)."
+              }
+            }
+          }
+        }
+      }
     }
-  }
+  },
+  "anyOf": [
+    {
+      "required": [
+        "entrypoint",
+        "runtime"
+      ]
+    },
+    {
+      "required": [
+        "project"
+      ]
+    }
+  ]
 }

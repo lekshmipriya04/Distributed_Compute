@@ -3,14 +3,24 @@
 // offline and sign-in-required servers, sign-in, and one real run.
 
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { ORIGINS, RUN, addWorkerViaApi, jwt, removeAllWorkers, signIn } from './helpers';
 
 const PAGES = [
   { path: '/ssh', heading: 'Add a worker' },
   { path: '/execute', heading: 'Language' },
+  // The Task Executor switched to running a whole project folder.
+  { path: '/execute', heading: 'Project folder', mode: 'Project folder' },
   { path: '/train', heading: 'Compute' },
 ];
+
+async function open(page: Page, p: (typeof PAGES)[number]) {
+  await page.goto(p.path); // a direct load exercises nginx's SPA fallback
+  if (p.mode) {
+    await page.getByRole('radio', { name: p.mode }).click();
+  }
+  await expect(page.getByRole('heading', { name: p.heading }).first()).toBeVisible();
+}
 
 test.describe.configure({ mode: 'serial' });
 
@@ -19,8 +29,7 @@ test('every page renders without errors, and deep links work', async ({ page, is
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
   for (const p of PAGES) {
-    await page.goto(p.path); // a direct load exercises nginx's SPA fallback
-    await expect(page.getByRole('heading', { name: p.heading }).first()).toBeVisible();
+    await open(page, p);
     await expect(page.getByTestId('gateway-status')).toContainText('Online');
   }
   await expect(page).toHaveTitle('Distributed Compute');
@@ -45,8 +54,7 @@ test('navigation works at this screen size', async ({ page }) => {
 
 test('nothing overflows sideways', async ({ page }) => {
   for (const p of PAGES) {
-    await page.goto(p.path);
-    await expect(page.getByRole('heading', { name: p.heading }).first()).toBeVisible();
+    await open(page, p);
     const overflow = await page.evaluate(() => {
       const root = document.scrollingElement ?? document.documentElement;
       const main = document.querySelector('main');
@@ -55,20 +63,19 @@ test('nothing overflows sideways', async ({ page }) => {
         main: main ? main.scrollWidth - main.clientWidth : 0,
       };
     });
-    expect(overflow.page, `${p.path} page`).toBeLessThanOrEqual(0);
-    expect(overflow.main, `${p.path} main`).toBeLessThanOrEqual(0);
+    expect(overflow.page, `${p.path} ${p.heading} page`).toBeLessThanOrEqual(0);
+    expect(overflow.main, `${p.path} ${p.heading} main`).toBeLessThanOrEqual(0);
   }
 });
 
 test('no serious accessibility problems', async ({ page }) => {
   for (const p of PAGES) {
-    await page.goto(p.path);
-    await expect(page.getByRole('heading', { name: p.heading }).first()).toBeVisible();
+    await open(page, p);
     const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze();
     const serious = violations
       .filter((v) => v.impact === 'serious' || v.impact === 'critical')
       .map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).slice(0, 3).join(', ')}`);
-    expect(serious, p.path).toEqual([]);
+    expect(serious, `${p.path} ${p.heading}`).toEqual([]);
   }
 });
 

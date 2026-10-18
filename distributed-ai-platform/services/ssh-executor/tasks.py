@@ -12,7 +12,10 @@ import asyncio
 import contextlib
 import dataclasses
 import json
+import os
 import posixpath
+import shlex
+import shutil
 import threading
 import time
 import types
@@ -32,6 +35,8 @@ from os_adapters.macos import MacOSAdapter
 from os_adapters.windows import WindowsAdapter
 from runtimes import DEFAULT_EXECUTION_POLICY, ResourceSpec, policy_nice
 from runtimes import CUSTOM_RUNTIME, get_runtime
+import projects
+from projects import ProjectRun
 from schemas import BatchCreateRequest
 from ssh import SSHTransport
 
@@ -215,6 +220,9 @@ class TaskExecutor:
         custom_filename: Optional[str] = None,
         execution_id: Optional[str] = None,
         extra_files: Optional[Dict[str, str]] = None,
+        project: Optional[ProjectRun] = None,
+        task_index: int = 0,
+        task_count: int = 1,
     ) -> Dict[str, Any]:
         spec = spec or ResourceSpec(cpu_cores=1, memory_gb=1.0)
         execution_id = execution_id or f"exec_{uuid.uuid4().hex}"
@@ -229,6 +237,12 @@ class TaskExecutor:
             if owns_connection:
                 self.transport.connect()
             sandbox = self._create_sandbox(execution_id)
+            if project is not None:
+                return self._run_project(
+                    sandbox, runtime, project, input_data, spec,
+                    env_path=env_path, execution_id=execution_id, started=started,
+                    task_index=task_index, task_count=task_count,
+                )
             return self._run_in_sandbox(
                 sandbox, runtime, code, input_data, spec,
                 env_path=env_path, custom_command=custom_command,
@@ -315,6 +329,143 @@ class TaskExecutor:
             "duration_ms": duration_ms,
             "runtime": runtime.id,
             "sandbox": sandbox,
+        }
+
+    def _helper(self, sandbox: str, *args: str, timeout: int) -> tuple[Dict[str, Any], dict]:
+        """Run one step of the project helper; returns (raw result, its DC_RESULT)."""
+        helper = self._sandbox_path(sandbox, projects.HELPER_FILENAME)
+        command = " ".join(
+            [shlex.quote(self.adapter.python_command()), shlex.quote(helper)] + list(args)
+        )
+        res = self.transport.exec(command, timeout=timeout, max_output_bytes=self.max_output_bytes)
+        return res, projects.parse_helper_json(res.get("stdout") or "") or {}
+
+    def _run_project(
+        self,
+        sandbox: str,
+        runtime: Any,
+        project: ProjectRun,
+        input_data: str,
+        spec: ResourceSpec,
+        *,
+        env_path: Optional[str],
+        execution_id: str,
+        started: datetime,
+        task_index: int,
+        task_count: int,
+    ) -> Dict[str, Any]:
+        """Unpack the project, build its environment, run its command, bring
+        back its outputs. Setup failures are task failures (exit code set), not
+        node failures, so they are not retried on other nodes."""
+        notes: list[str] = []
+
+        def failed(step: str, res: Dict[str, Any], info: dict) -> Dict[str, Any]:
+            detail = info.get("error") or "see the log below"
+            log = projects.tail(projects.strip_results((res.get("stderr") or "") + "\n" + (res.get("stdout") or "")))
+            out = self._error_result(execution_id, f"[dc] {step} failed: {detail}\n{log}".strip())
+            out.update(exit_code=res.get("exit_code") or 1, started_at=_iso(started),
+                       duration_ms=int((_now() - started).total_seconds() * 1000))
+            return out
+
+        q = shlex.quote
+        self._write_file(self._sandbox_path(sandbox, projects.HELPER_FILENAME), projects.HELPER_SOURCE)
+        self._write_file(self._sandbox_path(sandbox, INPUT_FILENAME), input_data)
+        for name, content in self.adapter.sandbox_support_files(runtime, spec).items():
+            self._write_file(self._sandbox_path(sandbox, name), content)
+        self.transport.upload(project.bundle_path, self._sandbox_path(sandbox, projects.BUNDLE_FILENAME))
+        placements = []
+        for i, (local, dest) in enumerate(project.datasets):
+            name = f"dc_data_{i}"
+            self.transport.upload(local, self._sandbox_path(sandbox, name))
+            placements.append([name, dest])
+        res, info = self._helper(sandbox, "prepare", q(sandbox), q(json.dumps(placements)), timeout=600)
+        if res.get("exit_code") != 0 or not info.get("ok"):
+            return failed("Unpacking the project", res, info)
+
+        task_path = self._path_for(env_path)
+        extra_env = projects.project_env(sandbox, project, task_index=task_index, task_count=task_count)
+        if project.requirements:
+            cache_root = '"$HOME"/' + projects.WORKER_CACHE_DIR
+            res, info = self._helper(
+                sandbox, "env", q(sandbox), q(project.requirements), cache_root,
+                str(int(project.env_cache_bytes)), str(int(project.env_timeout_seconds)),
+                timeout=project.env_timeout_seconds + 60,
+            )
+            if res.get("exit_code") != 0 or not info.get("ok"):
+                return failed("Building the environment", res, info)
+            env_dir = str(info["path"])
+            extra_env["VIRTUAL_ENV"] = env_dir
+            task_path = f"{env_dir}/bin:{task_path}" if task_path else f"{env_dir}/bin"
+            if info.get("reused"):
+                notes.append(f"[dc] environment: reused the cached one ({info.get('seconds')} s)")
+            elif info.get("cached"):
+                notes.append(f"[dc] environment: built with {info.get('tool')} in {info.get('seconds')} s, "
+                             "cached on this node for later tasks")
+            else:
+                notes.append(f"[dc] environment: built with {info.get('tool')} in {info.get('seconds')} s; "
+                             "it is deleted after the task (lend an environment cache on this node to reuse it)")
+
+        command = f"cd {projects.PROJECT_DIRNAME} && {project.command}"
+        launch = self.adapter.build_sandbox_command(
+            sandbox=sandbox,
+            runtime=runtime,
+            filename=projects.HELPER_FILENAME,
+            spec=spec,
+            nice=spec.nice,
+            env_path=task_path,
+            custom_command=None,
+            execution_id=execution_id,
+            max_output_bytes=self.max_output_bytes,
+            command_override=command,
+            extra_env=extra_env,
+        )
+        res = self.transport.exec(
+            launch, input_data=input_data, timeout=spec.timeout_seconds + 30,
+            max_output_bytes=self.max_output_bytes,
+        )
+        exit_code = res.get("exit_code")
+        stdout = res.get("stdout") or ""
+        stderr = res.get("stderr") or ""
+        if exit_code == 124 and "[task timed out]" not in stderr:
+            stderr = (stderr + "\n[task timed out]").strip()
+
+        output_files = output_bytes = None
+        if project.outputs:
+            pres, pinfo = self._helper(
+                sandbox, "pack", q(sandbox), str(int(project.max_output_bytes)),
+                q(json.dumps(project.outputs)), timeout=600,
+            )
+            if pres.get("exit_code") == 0 and pinfo.get("ok"):
+                output_files = int(pinfo.get("files") or 0)
+                output_bytes = int(pinfo.get("bytes") or 0)
+                if output_files:
+                    self.transport.fetch(
+                        self._sandbox_path(sandbox, projects.OUTPUTS_ARCHIVE), project.output_path
+                    )
+                if pinfo.get("skipped_count"):
+                    notes.append(
+                        f"[dc] outputs: {pinfo['skipped_count']} file(s) left out, over the "
+                        f"{project.max_output_bytes // 2**20} MB limit: " + ", ".join(pinfo.get("skipped") or [])
+                    )
+            else:
+                notes.append("[dc] outputs could not be collected: "
+                             + (pinfo.get("error") or projects.tail(pres.get("stderr") or "", 500)))
+        if notes:
+            stderr = "\n".join(notes) + ("\n" + stderr if stderr else "")
+        finished = _now()
+        return {
+            "status": "success" if exit_code == 0 else "error",
+            "exit_code": exit_code,
+            "stdout": stdout,
+            "stderr": stderr,
+            "execution_id": execution_id,
+            "started_at": _iso(started),
+            "finished_at": _iso(finished),
+            "duration_ms": int((finished - started).total_seconds() * 1000),
+            "runtime": runtime.id,
+            "sandbox": sandbox,
+            "output_files": output_files,
+            "output_bytes": output_bytes,
         }
 
     def run_python(
@@ -551,6 +702,7 @@ async def run_across_nodes(
     cancel_check: Optional[CancelCheck] = None,
     sweep_minutes: Optional[int] = None,
     affinity: Optional[list] = None,
+    project_for: Optional[Callable[[int, Any], ProjectRun]] = None,
 ) -> list[dict]:
     n = len(inputs)
     if n == 0:
@@ -659,12 +811,14 @@ async def run_across_nodes(
                 })
                 extra = files_for(item.idx) if files_for else None
                 try:
+                    project = project_for(item.idx, alloc.node) if project_for else None
                     raw = await asyncio.to_thread(
                         _run_in_slot, slot, sweeper,
                         runtime_id=runtime_id, code=code, input_data=inputs[item.idx] or "",
                         spec=spec, custom_command=custom_command,
                         custom_filename=custom_filename, execution_id=execution_id,
                         extra_files=extra, nice=nice, max_output_bytes=max_output_bytes,
+                        project=project, task_index=item.idx, task_count=n,
                     )
                     outcome = classify_result(raw or {})
                 except Exception as exc:
@@ -784,7 +938,7 @@ async def run_across_nodes(
 
 def _run_in_slot(slot: _Slot, sweeper: _Sweeper, *, runtime_id, code, input_data, spec,
                  custom_command, custom_filename, execution_id, extra_files,
-                 nice, max_output_bytes) -> dict:
+                 nice, max_output_bytes, project=None, task_index=0, task_count=1) -> dict:
     executor = _open_slot(slot, nice, max_output_bytes, sweeper)
     return executor.run(
         runtime_id,
@@ -796,6 +950,9 @@ def _run_in_slot(slot: _Slot, sweeper: _Sweeper, *, runtime_id, code, input_data
         custom_filename=custom_filename,
         execution_id=execution_id,
         extra_files=extra_files,
+        project=project,
+        task_index=task_index,
+        task_count=task_count,
     )
 
 
@@ -820,6 +977,8 @@ def _terminal(idx: int, status: str, raw: dict, node_id, attempts: int,
         "finished_at": finished_at,
         "duration_ms": duration,
         "infra_error": infra,
+        "output_files": raw.get("output_files"),
+        "output_bytes": raw.get("output_bytes"),
     }
 
 
@@ -911,6 +1070,7 @@ async def _load_batch(batch_id: uuid.UUID) -> Optional[tuple[Any, list[Any]]]:
             timeout_seconds=batch.timeout_seconds, node_ids_json=batch.node_ids_json,
             status=batch.status,
             execution_policy=getattr(batch, "execution_policy", None) or DEFAULT_EXECUTION_POLICY,
+            project_json=batch.project_json,
         )
         task_snaps = [
             types.SimpleNamespace(id=t.id, seq=t.seq, input_data=t.input_data or "")
@@ -1029,7 +1189,91 @@ def _task_fields(phase: str, info: dict) -> dict:
         "started_at": info.get("started_at"),
         "finished_at": info.get("finished_at"),
         "duration_ms": info.get("duration_ms"),
+        "output_files": info.get("output_files"),
+        "output_bytes": info.get("output_bytes"),
     }
+
+
+PROJECT_RUNTIME = "project"
+
+
+class ProjectSetupError(RuntimeError):
+    """A project batch cannot start (bundle gone, dataset unreadable)."""
+
+
+def project_nodes(nodes: list) -> list:
+    """Online POSIX nodes with python3: projects need the helper to run."""
+    return [n for n in select_runtime_nodes(nodes, "python") if (getattr(n, "os_type", None) or "linux") != "windows"]
+
+
+def project_stores(settings) -> tuple[projects.BundleStore, projects.OutputStore, str]:
+    root = settings.project_data_dir
+    return (
+        projects.BundleStore(posixpath.join(root, "bundles")),
+        projects.OutputStore(posixpath.join(root, "outputs")),
+        posixpath.join(root, "datasets"),
+    )
+
+
+def _dataset_filename(metadata: dict) -> str:
+    fmt = (metadata.get("file_format") or "csv").lower()
+    stem = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in (metadata.get("name") or "dataset"))
+    stem = stem.strip("_") or "dataset"
+    return stem if stem.lower().endswith("." + fmt) else f"{stem}.{fmt}"
+
+
+async def _fetch_dataset_copy(dataset_id: str, owner_id: str, cache_dir: str, settings) -> tuple[str, dict]:
+    """A local copy of an owner's dataset (kept and reused while its size matches)."""
+    from training import _download_to_file, _fetch_metadata
+
+    try:
+        metadata = await _fetch_metadata(dataset_id, settings, owner_id)
+    except Exception as exc:
+        raise ProjectSetupError(f"Dataset {dataset_id}: {exc}") from exc
+    folder = posixpath.join(cache_dir, projects._owner_dir(owner_id))
+    os.makedirs(folder, exist_ok=True)
+    target = posixpath.join(folder, f"{metadata['id']}.{(metadata.get('file_format') or 'csv').lower()}")
+    expected = metadata.get("size_bytes")
+    if not (os.path.isfile(target) and (expected is None or os.path.getsize(target) == expected)):
+        try:
+            tmp = await asyncio.to_thread(_download_to_file, metadata, settings, owner_id)
+        except Exception as exc:
+            raise ProjectSetupError(f"Dataset {dataset_id}: {exc}") from exc
+        shutil.move(tmp, target)
+    return target, metadata
+
+
+async def _prepare_project(batch, tasks: list, settings) -> Callable[[int, Any], ProjectRun]:
+    """Check the bundle, fetch the datasets, and return the per-task runs."""
+    from schemas import ProjectSpec
+
+    spec = ProjectSpec.model_validate_json(batch.project_json or "{}")
+    bundles, outputs, dataset_dir = project_stores(settings)
+    bundle = bundles.path(batch.owner_id, spec.bundle_id)
+    if not bundle.is_file():
+        raise ProjectSetupError("The project files are no longer on the master; run the project again to upload them")
+    datasets: list[tuple[str, str]] = []
+    for item in spec.datasets:
+        local, metadata = await _fetch_dataset_copy(str(item.dataset_id), batch.owner_id, dataset_dir, settings)
+        datasets.append((local, item.path or f"data/{_dataset_filename(metadata)}"))
+    outputs.root.mkdir(parents=True, exist_ok=True)
+    for task in tasks:
+        outputs.delete(str(task.id))
+
+    def project_for(idx: int, node: Any) -> ProjectRun:
+        return ProjectRun(
+            bundle_path=str(bundle),
+            command=spec.command,
+            output_path=str(outputs.path(str(tasks[idx].id))),
+            requirements=spec.requirements,
+            outputs=list(spec.outputs),
+            datasets=datasets,
+            env_cache_bytes=int(float(getattr(node, "env_cache_gb", 0.0) or 0.0) * 1024 ** 3),
+            env_timeout_seconds=settings.env_build_timeout_seconds,
+            max_output_bytes=settings.max_project_output_bytes,
+        )
+
+    return project_for
 
 
 async def dispatch_batch(batch_id: uuid.UUID, node_ids: Optional[list] = None) -> None:
@@ -1067,12 +1311,19 @@ async def dispatch_batch(batch_id: uuid.UUID, node_ids: Optional[list] = None) -
 
         allocations: list[NodeAllocation] = []
         failure: Optional[str] = None
+        is_project = batch.runtime == PROJECT_RUNTIME
         try:
+            project_for = None
+            if is_project:
+                project_for = await _prepare_project(batch, tasks, settings)
             nodes = await _select_nodes(owner_id, node_ids)
-            capable = select_runtime_nodes(nodes, batch.runtime)
+            capable = (project_nodes(nodes) if is_project
+                       else select_runtime_nodes(nodes, batch.runtime))
             fitting = [n for n in capable if int(n.allocated_cpu or 0) >= cpu_per_task]
             if not nodes:
                 failure = "No online provider nodes available"
+            elif not capable and is_project:
+                failure = "Projects need a Linux or macOS node with python3; none of the selected online nodes has both"
             elif not capable:
                 failure = f"No selected online node has runtime '{batch.runtime}'"
             elif not fitting:
@@ -1103,7 +1354,7 @@ async def dispatch_batch(batch_id: uuid.UUID, node_ids: Optional[list] = None) -
                             allocations,
                             batch.code,
                             [t.input_data for t in tasks],
-                            runtime_id=batch.runtime,
+                            runtime_id="python" if is_project else batch.runtime,
                             custom_command=batch.custom_command,
                             custom_filename=batch.custom_filename,
                             timeout_seconds=timeout,
@@ -1112,7 +1363,10 @@ async def dispatch_batch(batch_id: uuid.UUID, node_ids: Optional[list] = None) -
                             on_update=on_update,
                             cancel_check=cancel_check,
                             sweep_minutes=settings.stale_sandbox_minutes,
+                            project_for=project_for,
                         )
+        except ProjectSetupError as exc:
+            failure = str(exc)
         except Exception as exc:
             logger.exception("dispatch_batch_error", batch_id=str(batch_id))
             failure = f"Dispatcher error: {exc}"
@@ -1148,6 +1402,7 @@ class BatchService:
             timeout_seconds=int(timeout_seconds),
             execution_policy=request.execution_policy,
             node_ids_json=json.dumps([str(n) for n in request.node_ids]),
+            project_json=request.project.model_dump_json() if request.project else None,
             status="pending",
             total=len(inputs),
         )

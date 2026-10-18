@@ -18,20 +18,29 @@ with `scripts/measure-startup.sh`). HDFS is still available with
 `make up-hdfs`. Existing installs move their datasets with
 `make migrate-datasets` (section 6).
 
+2.0.0 also adds **projects**: a whole folder with its `requirements.txt`
+runs on the workers (VS Code **Run Project on Workers…**, the dashboard's
+**Project folder**, or the new `dc` command line in `clients/cli`); each
+worker builds the environment, and the files each task writes to `outputs/`
+come back. Tested end to end with a real scikit-learn sweep on two workers.
+New: the `project_files` volume (bundles and task outputs, part of
+`make backup`) and the Debian-based test workers
+(`infrastructure/docker/ssh-worker`).
+
 ## 1. Where things stand
 
 | Area | Verified on | How |
 |---|---|---|
-| Extension unit tests (84) | macOS | `npm test` |
+| Extension unit tests (96) | macOS | `npm test` |
 | Extension in a real VS Code 1.142 | macOS | `npm run test:vscode`, offline and against gateways on ports 8091 and 8092 |
 | Every step of the extension README, driven in a real VS Code | macOS + Docker | `npm run docs:screenshots` (also re-creates the 20 README images) |
 | Every step of the dashboard README, in the production image | macOS + Docker | `npm run docs:screenshots` in `frontend/` (16 images) |
-| Multi-user end to end (19 tests) | macOS + Docker | `npm run test:e2e`: 3 users on ports 8090/8091/8092, 2 SSH test workers |
+| Multi-user end to end, including projects (24 tests) | macOS + Docker | `npm run test:e2e`: 3 users on ports 8090/8091/8092, 2 SSH test workers |
 | `.vsix` packages as `aaron43210.distributed-ai-compute`, README image links point into the repository | macOS | `npm run package` |
 | Gateway builds for linux, darwin, windows (amd64, arm64) | macOS cross-compile | `go build` with `GOOS`/`GOARCH` |
-| Python services (133 tests), ruff, mypy | macOS | `pytest`, `make lint` |
-| Dashboard unit tests (29), ESLint, build | macOS | `npm test`, `npm run lint`, `npm run build` |
-| Dashboard in Chromium, Firefox, WebKit, Android (Pixel 7) and iPhone 14 emulation (53 tests) | macOS + Docker | `npm run test:e2e`: the nginx image on ports 4101/4102/4103 as three users, 2 SSH test workers |
+| Python services and the `dc` command line (196 tests), ruff, mypy | macOS | `pytest`, `make lint` |
+| Dashboard unit tests (41), ESLint, build | macOS | `npm test`, `npm run lint`, `npm run build` |
+| Dashboard in Chromium, Firefox, WebKit, Android (Pixel 7) and iPhone 14 emulation (58 tests, including a project folder run and the project page in every engine) | macOS + Docker | `npm run test:e2e`: the nginx image on ports 4101/4102/4103 as three users, 2 SSH test workers |
 | Extension and dashboard build on **Windows and Linux** | **not yet**: first CI run | `extension` and `frontend` jobs, OS matrix |
 | Full stack in CI | **not yet**: first CI run | `e2e` job |
 | **Windows worker machines** | **never** | implemented, not tested on real Windows hosts |
@@ -221,8 +230,19 @@ datasets downloaded byte for byte afterwards with HDFS stopped.
   of disk). The running stack needs about 0.6 GB of memory for Docker
   (about 2 GB with HDFS).
 - Spark + Ray is optional and adds about 1 GB on the master.
+- Projects run on Linux and macOS workers only; workers need `python3 -m venv`
+  (or uv) and access to a package index. A task runs for at most one hour, a
+  master restart stops running tasks, and there is no multi-machine launcher
+  (`torchrun`) yet.
 
 ## 8. Next (2.1.0)
+
+- Long jobs: tasks that keep running when the master restarts, longer time
+  limits, and checkpoints that are restored on retry.
+- Multi-machine training: `torchrun`, `accelerate`, DeepSpeed and Ray
+  launchers with all workers leased together; whole GPUs per task.
+- Sweeps and metrics: a parameter grid in `distributed.json`, metrics from
+  `outputs/metrics.json` compared across tasks.
 
 - Publish prebuilt images to GitHub Container Registry so setup pulls instead
   of building.

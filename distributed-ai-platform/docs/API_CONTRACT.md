@@ -54,8 +54,8 @@ Semantics:
 |---|---|---|
 | `GET /api/v1/ssh/nodes` | `NodeListResponse {items: NodeResponse[], total}` | |
 | `GET /api/v1/ssh/nodes/{id}` | `NodeResponse` | |
-| `PATCH /api/v1/ssh/nodes/{id}` `NodeUpdateRequest {name?, status?, allocated_cpu?, allocated_memory_gb?, allocated_gpu_count?, allocated_gpu_memory_gb?}` | `NodeResponse` | rename / change allocation (≤ detected, GPU included); `status` `draining` keeps running work but gives the node no new tasks or training, `online` resumes |
-| `DELETE /api/v1/ssh/nodes/{id}` | `NodeDeleteResponse {deleted, key_removed, message}` | removes our authorized_keys line, then the row |
+| `PATCH /api/v1/ssh/nodes/{id}` `NodeUpdateRequest {name?, status?, allocated_cpu?, allocated_memory_gb?, allocated_gpu_count?, allocated_gpu_memory_gb?, env_cache_gb?}` | `NodeResponse` | rename / change allocation (≤ detected, GPU included); `status` `draining` keeps running work but gives the node no new tasks or training, `online` resumes; `env_cache_gb` (0–10000) lends disk for cached project environments, 0 turns the cache off |
+| `DELETE /api/v1/ssh/nodes/{id}` | `NodeDeleteResponse {deleted, key_removed, message}` | removes `~/.cache/distributed-compute` (project environments) and our authorized_keys line, then the row |
 | `POST /api/v1/ssh/nodes/{id}/health-check` | `NodeResponse` | key login + `echo` |
 | `POST /api/v1/ssh/nodes/{id}/refresh` | `NodeResponse` | re-detect capabilities + runtimes |
 | `POST /api/v1/ssh/nodes/{id}/rotate-key` | `NodeResponse` | install new key, verify, remove old line |
@@ -64,8 +64,9 @@ Semantics:
 
 `NodeResponse` = capability fields + `{id, owner_id, name, host, port, username,
 auth_type, fingerprint, key_created_at, allocated_cpu, allocated_memory_gb,
-allocated_gpu_count, allocated_gpu_memory_gb, allocated_gpu_fraction, status,
-health_status, last_health_check, created_at, updated_at}`.
+allocated_gpu_count, allocated_gpu_memory_gb, allocated_gpu_fraction,
+env_cache_gb, status, health_status, last_health_check, created_at,
+updated_at}`.
 `auth_type != "managed_key"` means a legacy node; the UI shows a "Re-secure"
 action. `runtimes` is `{runtime_id: version}`. Capability fields include
 `gpu_runtime` (`"torch-cuda" | "torch-mps" | null`): PyTorch with a GPU
@@ -142,12 +143,13 @@ sandbox is deleted afterwards.
 ### 2.2 Batches
 | Request | Response |
 |---|---|
-| `POST /api/v1/ssh/batches` `BatchCreateRequest {code, inputs[], node_ids[], runtime, custom_command?, custom_filename?, cpu_per_task=1, timeout_seconds?, execution_policy="safe_background"}` | `201 BatchResponse` |
+| `POST /api/v1/ssh/batches` `BatchCreateRequest {code, inputs[], node_ids[], runtime, custom_command?, custom_filename?, cpu_per_task=1, timeout_seconds?, execution_policy="safe_background", project?}` | `201 BatchResponse` |
 | `GET /api/v1/ssh/batches` | `BatchListResponse {items}` (latest 20) |
 | `GET /api/v1/ssh/batches/{id}` | `BatchResponse` |
 | `GET /api/v1/ssh/batches/{id}/tasks` | `BatchTasksResponse {batch, tasks[]}` |
 | `POST /api/v1/ssh/batches/{id}/cancel` | `BatchResponse` (status `cancelling` → `cancelled`) |
-| `POST /api/v1/ssh/batches/{id}/retry[?failed_only=true]` | `201 BatchResponse`: a new batch with the same code and settings; every input, or only those whose task failed or was cancelled. 409 while the batch is still running; 400 when `failed_only` finds nothing to retry |
+| `POST /api/v1/ssh/batches/{id}/retry[?failed_only=true]` | `201 BatchResponse`: a new batch with the same code (or project) and settings; every input, or only those whose task failed or was cancelled. 409 while the batch is still running; 400 when `failed_only` finds nothing to retry |
+| `GET /api/v1/ssh/batches/{id}/tasks/{task_id}/outputs` | `200 application/gzip`, `Content-Disposition: attachment; filename="outputs-<batch8>-task<N>.tar.gz"`: what a project task wrote to its output folders. 404 when the batch is not the caller's or the task brought back no files |
 
 Each input becomes one task. The task's code runs with that input on **stdin**
 (and also available as file `input.txt` in the sandbox). Validation (400):
@@ -155,6 +157,57 @@ unknown or disallowed runtime; `custom` without `{file}` in `custom_command` or
 with a `custom_filename` that fails `^[A-Za-z0-9._-]{1,128}$`; empty code; code
 or input limits; `timeout_seconds > max_task_timeout_seconds`; no selected
 online node has the runtime (400 naming the runtime).
+
+`TaskResponse` = `{id, batch_id, seq, node_id, status, exit_code, stdout,
+stderr, attempts, started_at, finished_at, duration_ms, output_files,
+output_bytes}`; `output_files`/`output_bytes` are set for project tasks.
+`BatchResponse` carries `project` (the `ProjectSpec` below) for project runs.
+
+### 2.3 Projects (new in 2.0)
+
+A project runs a folder instead of one file. Upload it once, then start a
+batch with `project` set; `runtime` becomes `project` and `code` is ignored.
+
+| Request | Response |
+|---|---|
+| `POST /api/v1/ssh/bundles` (raw body: a `.tar.gz`, `Content-Type: application/gzip`) | `201 BundleResponse {id, size_bytes, files, unpacked_bytes}`; `id` is the archive's sha256. 400 not a gzip tar, unsafe path (absolute, `..`), a link or device, or empty; 413 over `max_bundle_bytes` (200 MB), `max_bundle_unpacked_bytes` (2 GB) or `max_bundle_files` (50,000) |
+| `GET /api/v1/ssh/bundles/{sha256}` | `200 BundleResponse` when the caller already uploaded it, else 404. Bundles are stored per owner: another user's hash is always 404 |
+
+`ProjectSpec {bundle_id, command, requirements?, outputs=["outputs"],
+datasets=[{dataset_id, path?}]}`:
+
+- `command` (≤ 4096 characters) runs with `/bin/sh` inside the unpacked folder.
+- `requirements`: a pip requirements file in the folder. The worker builds a
+  virtual environment from it (`uv` when installed, else `python3 -m venv` +
+  pip) and puts its `bin/` first on `PATH`. It is built in the sandbox and
+  deleted, unless the node has `env_cache_gb > 0`: then it is kept under
+  `~/.cache/distributed-compute/envs/<hash of the file, Python version,
+  platform>` and reused; least recently used environments are removed to stay
+  within the cache size.
+- `outputs`: folders (or files) brought back after the command, whatever its
+  exit code, including after a timeout; at most `max_project_output_bytes`
+  (500 MB) per task, larger files are left out and named in the task's stderr.
+- `datasets`: copied into the folder before the command (default path
+  `data/<name>.<format>`), read through storage-service as the batch's owner.
+- Paths must be relative and stay inside the folder (400 otherwise).
+
+The command sees `DC_PROJECT_DIR`, `DC_OUTPUT_DIR` (first output folder),
+`DC_DATA_DIR`, `DC_INPUT_FILE`, `DC_TASK_INDEX` (0-based), `DC_TASK_COUNT`,
+and `VIRTUAL_ENV` when an environment was built, plus the usual sandbox
+variables. The task's input is also on stdin.
+
+A failed unpack or environment build fails that task with exit code ≠ 0 and
+`[dc] Building the environment failed: …` followed by pip's output in
+`stderr`; it is not retried on another node. Validation (400): unknown
+`bundle_id` for this owner; no selected online **Linux or macOS** node with
+`python3` (Windows workers do not run projects yet); input or timeout limits.
+
+Through the extension gateway (port 8090, used by VS Code and `dc`):
+`POST /bundles`, `GET /bundles/{id}`, `POST /executions` with
+`project {bundleId, command, requirements?, outputs?, datasets?: [{datasetId, path?}]}`
+(camelCase; `code` may then be empty), and
+`GET /executions/{id}/tasks/{taskId}/outputs`. `PATCH /nodes/{id}` accepts
+`envCacheGb`, and nodes report it.
 
 Batch statuses: `pending | running | cancelling | cancelled | completed |
 completed_with_errors | failed`. Task statuses: `pending | running |
@@ -217,7 +270,8 @@ only for jobs that use the GPU. FedAvg weights by shard size.
 | `node_service.py` | `transport_for_node(node: SSHNode) -> SSHTransport` (not connected; key auth for managed nodes, legacy secret otherwise, host key pinned) | dispatcher, training, recovery |
 | `capabilities.py` | `detect_capabilities(transport, adapter, timeout=20) -> NodeCapabilities` with fields `os_type, os_version, cpu_total, memory_total_gb, gpu_vendor, gpu_backend, gpu_model, gpu_count, gpu_memory_gb, gpu_runtime: Optional[str], python_version, runtimes: dict[str,str], env_path: Optional[str], execution_backend, resource_enforcement` (no java/spark/ray fields) | node_service |
 | `task_executor.py` | `detect_os(transport, timeout=15) -> str`, `select_adapter(os_type) -> OSAdapter` (signatures stable) | node_service |
-| `task_executor.py` | `TaskExecutor(transport, adapter, ...).run(runtime_id, code, input_data, spec, *, env_path, custom_command=None, custom_filename=None, execution_id=None, extra_files=None) -> dict{status, exit_code, stdout, stderr, execution_id, started_at, finished_at, duration_ms}`; `cancel(execution_id)`; `sweep_stale_sandboxes(older_than_minutes)` | dispatcher, training |
+| `tasks.py` | `TaskExecutor(transport, adapter, ...).run(runtime_id, code, input_data, spec, *, env_path, custom_command=None, custom_filename=None, execution_id=None, extra_files=None, project: ProjectRun = None, task_index=0, task_count=1) -> dict{status, exit_code, stdout, stderr, execution_id, started_at, finished_at, duration_ms, output_files?, output_bytes?}`; `cancel(execution_id)`; `sweep_stale_sandboxes(older_than_minutes)` | dispatcher, training |
+| `projects.py` | `BundleStore`, `OutputStore`, `ProjectRun`, `HELPER_SOURCE` (the worker-side `dc_project.py`: `prepare`, `env`, `pack`, standard library only) | routes, dispatcher |
 | `runtimes.py` | `list_runtimes() -> list[Runtime]`, `get_runtime(id) -> Runtime \| None` | routes_batches, capabilities, validation |
 | `lease_service.py` | `reserve(...)` is atomic (`SELECT … FOR UPDATE` on the node row) | dispatcher, training |
 | `lease_recovery.py` | `start_recovery_loop()`, `stop_recovery_loop(task)` | main.py |

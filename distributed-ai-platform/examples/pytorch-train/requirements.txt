@@ -1,0 +1,4 @@
+# The CPU build is much smaller; drop the next line on a CUDA worker.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+numpy

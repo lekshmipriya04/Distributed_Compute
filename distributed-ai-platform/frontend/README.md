@@ -1,7 +1,7 @@
 # Distributed Compute: web dashboard
 
 The dashboard lets you do everything from a browser: add worker machines, run
-code on all of them in parallel, and train models. It is part of the platform
+code or a whole project folder on all of them in parallel, and train models. It is part of the platform
 and starts with it; there is nothing extra to install.
 
 **Open it at http://localhost:3001** after starting the platform (`make up`
@@ -13,7 +13,8 @@ extension). It works in Chrome, Edge, Firefox and Safari, and on phones.
 - [1. Sign in (only on shared servers)](#1-sign-in-only-on-shared-servers)
 - [2. Add a worker](#2-add-a-worker)
 - [3. Run code in parallel](#3-run-code-in-parallel)
-- [4. Train a model](#4-train-a-model)
+- [4. Run your own project (new in 2.0)](#4-run-your-own-project-new-in-20)
+- [5. Train with the built-in trainer](#5-train-with-the-built-in-trainer)
 - [Use it well](#use-it-well) · [Troubleshooting](#troubleshooting) · [For developers](#for-developers)
 
 The three pages are in the sidebar (on a phone, the bar at the top):
@@ -85,7 +86,7 @@ left to right:
 | Re-detect resources and languages | Finds newly installed languages and hardware. |
 | Rotate access key | Replaces the platform's key on the worker with a new one. |
 | Drain worker / Resume worker | Drain: running work finishes, no new work is sent. Resume: back to normal. |
-| Edit name and allocation | Rename it or change the cores, memory and GPU it lends. |
+| Edit name and allocation | Rename it or change the cores, memory and GPU it lends, and the environment cache for projects (see section 4). |
 | Remove worker | Forgets the worker and deletes the platform's key from it. |
 
 ![The list of workers](docs/images/05-workers.png)
@@ -130,7 +131,48 @@ click one to see it again.
 
 ![Retrying only the failed task](docs/images/11-retry.png)
 
-## 4. Train a model
+## 4. Run your own project (new in 2.0)
+
+A project is a whole folder: your code split over several files, configs, and
+a `requirements.txt`. Use it for real training scripts (PyTorch,
+scikit-learn, Hugging Face…) that you would otherwise run with
+`python train.py` on one machine.
+
+Open **Task Executor** and switch to **Project folder** (top right of the
+first card). Click **Choose the project folder** and pick it. The page shows
+how many files will be sent; `.git`, caches, virtual environments and
+`outputs/` are left out. Check the **command** (it is guessed from the files,
+for example `python3 train.py`), the **requirements file** (filled in when the
+folder has `requirements.txt`) and the **folders to bring back** (`outputs`).
+Each line of **Inputs** is one task: here, one value of C per task. Only
+Linux and macOS workers with Python 3 can be chosen. Click **Run project**.
+
+![Choosing a project folder](docs/images/17-project-folder.png)
+
+Each worker unpacks the folder, builds the Python environment from the
+requirements file, and runs the command inside the folder. The task's input is
+on standard input and in `$DC_INPUT_FILE`; `$DC_OUTPUT_DIR` is the folder to
+write results to. Each task shows its output as before, plus a line saying how
+its environment was built. When a task wrote files, an **Outputs** button
+downloads them as a `.tar.gz`.
+
+![Three scikit-learn tasks, each with its output files](docs/images/18-project-results.png)
+
+**Faster repeats: the environment cache.** Without a cache, every task builds
+its environment from scratch and it is deleted afterwards, so nothing stays on
+the worker. On **SSH Connection**, edit a worker (pencil icon) and move
+**Environment cache for projects** above off: environments are then kept in
+`~/.cache/distributed-compute` on that machine and reused by later tasks with
+the same requirements. In our test a scikit-learn task went from 46 s to
+1.2 s. The cache is deleted when you remove the worker.
+
+If the requirements cannot be installed (a misspelled package, or a package
+that needs a compiler the worker does not have), the task fails with pip's
+message at the top of its log.
+
+Example folders to try are in [`examples/`](../examples).
+
+## 5. Train with the built-in trainer
 
 Open **Train Job**.
 
@@ -190,6 +232,10 @@ Everything works on a phone or tablet; the menu moves to the top.
 | "Could not reach" a worker | Check the address (not `localhost`), that the machine is on and that SSH runs on that port. |
 | A language is greyed out | It is not installed on any online worker. Install it there, then click Re-detect on the worker. |
 | "This dataset is stored in HDFS, which is not running" | The dataset was uploaded before 2.0.0. Run `make migrate-datasets` once in `distributed-ai-platform/`. |
+| "Projects need a Linux or macOS node with python3" | Add such a worker. Windows workers can run single files, not projects yet. |
+| A project task fails with "[dc] Building the environment failed" | pip's message follows. Fix the package name or version in `requirements.txt`. A package that needs a compiler may need a worker with one, or a version that publishes ready-made wheels. |
+| "python3 -m venv is not available on this worker" | On Debian/Ubuntu install `python3-venv` on the worker, or install [uv](https://docs.astral.sh/uv/). |
+| A project has no **Outputs** button | The task wrote nothing to `outputs/` (or the folders you listed). Write results to `$DC_OUTPUT_DIR`. |
 | "Not enough free disk space" | Free some disk space for Docker, or delete datasets you no longer need. |
 
 ## For developers

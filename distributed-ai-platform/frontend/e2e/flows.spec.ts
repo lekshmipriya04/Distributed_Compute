@@ -1,6 +1,9 @@
 // Full flows against the real platform: three users on three dashboard
 // ports, real SSH workers, real runs and training.
 
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { ORIGINS, RUN, WORKER, addWorkerViaApi, api, jwt, removeAllWorkers, signIn } from './helpers';
 
@@ -179,6 +182,47 @@ test('trains a model from an uploaded CSV and downloads it', async () => {
   // Bob does not see alice's dataset.
   const datasets = await api<{ items: { name: string }[] }>(bob, 'GET', '/api/v1/storage/datasets?limit=200');
   expect(datasets.items.map((d) => d.name)).not.toContain(`web-${RUN}`);
+});
+
+test('runs a project folder with its requirements and downloads a task’s outputs', async () => {
+  const page = alice;
+  // A folder like a user's: its own module, a requirements file, and junk that must stay behind.
+  const dir = path.join(mkdtempSync(path.join(tmpdir(), 'dc-web-')), 'web-project');
+  for (const [rel, text] of Object.entries({
+    'main.py': 'import os, sys\nfrom tabulate import tabulate\nfrom helpers.calc import double\n'
+      + 'n = int(sys.stdin.read())\nos.makedirs(os.environ["DC_OUTPUT_DIR"], exist_ok=True)\n'
+      + 'open(os.path.join(os.environ["DC_OUTPUT_DIR"], "result.txt"), "w").write(str(double(n)))\n'
+      + 'print(tabulate([["input", n], ["double", double(n)]]))\n',
+    'helpers/__init__.py': '',
+    'helpers/calc.py': 'def double(x):\n    return 2 * x\n',
+    'requirements.txt': 'tabulate==0.9.0\n',
+    '.venv/bin/python': 'not sent',
+    'outputs/old.txt': 'not sent',
+  })) {
+    mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+    writeFileSync(path.join(dir, rel), text);
+  }
+  await page.goto(`${ORIGINS.alice}/execute`);
+  await page.getByRole('radio', { name: 'Project folder' }).click();
+  await page.getByTestId('project-folder').setInputFiles(dir);
+  await expect(page.getByTestId('project-summary')).toContainText('web-project · 4 files');
+  await expect(page.getByPlaceholder('python3 train.py --epochs 3')).toHaveValue('python3 main.py');
+  await expect(page.getByPlaceholder('requirements.txt')).toHaveValue('requirements.txt');
+  await page.getByLabel(/^Inputs/).fill('3\n21');
+  await page.getByRole('button', { name: 'Run project' }).click();
+  await expect(page.getByTestId('batch-summary')).toHaveText(/2\/2 done · 0 failed/, { timeout: 300_000 });
+  await expect(page.getByText(/double\s+42/)).toBeVisible();
+  await expect(page.getByText(/\[dc\] environment: built with pip/).first()).toBeVisible();
+
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: /Outputs \(1 file/ }).first().click();
+  expect((await download).suggestedFilename()).toMatch(/^outputs-[0-9a-f]{8}-task\d\.tar\.gz$/);
+
+  // Bob, on his own port, sees neither the run nor its outputs.
+  const mine = await api<{ items: { id: string; runtime: string }[] }>(page, 'GET', '/api/v1/ssh/batches');
+  const run = mine.items.find((b) => b.runtime === 'project');
+  expect(run).toBeTruthy();
+  await expect(api(bob, 'GET', `/api/v1/ssh/batches/${run!.id}/tasks`)).rejects.toThrow(/404/);
 });
 
 test('bob works in parallel with his own worker', async () => {

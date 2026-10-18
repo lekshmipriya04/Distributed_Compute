@@ -83,10 +83,20 @@ export interface TaskOutput {
   stderr?: string | null;
   attempts: number;
   duration_ms?: number | null;
+  /** Project runs: files brought back from the output folders. */
+  output_files?: number | null;
+  output_bytes?: number | null;
 }
 
 export interface ExecutionTasks {
-  batch: { id: string; runtime: string; status: string; message?: string | null; total: number };
+  batch: {
+    id: string;
+    runtime: string;
+    status: string;
+    message?: string | null;
+    total: number;
+    project?: { command: string; requirements?: string | null; outputs?: string[] } | null;
+  };
   tasks: TaskOutput[];
 }
 
@@ -181,7 +191,9 @@ export function formatTaskLog(data: ExecutionTasks, nodeNames: Record<string, st
   const done = data.tasks.filter((t) => !['pending', 'running'].includes(t.status)).length;
   const lines = [
     `Execution ${b.id}`,
-    `Runtime ${b.runtime} · ${b.status} · ${done}/${data.tasks.length || b.total} tasks finished`,
+    b.project
+      ? `Project · ${b.project.command} · ${b.status} · ${done}/${data.tasks.length || b.total} tasks finished`
+      : `Runtime ${b.runtime} · ${b.status} · ${done}/${data.tasks.length || b.total} tasks finished`,
   ];
   if (b.message) {
     lines.push(b.message);
@@ -190,7 +202,8 @@ export function formatTaskLog(data: ExecutionTasks, nodeNames: Record<string, st
     const node = t.node_id ? nodeNames[t.node_id] ?? t.node_id : 'not scheduled yet';
     const exit = t.exit_code === null || t.exit_code === undefined ? '' : ` · exit ${t.exit_code}`;
     const time = t.duration_ms ? ` · ${(t.duration_ms / 1000).toFixed(1)}s` : '';
-    lines.push('', `━━ Task ${t.seq + 1} · ${t.status}${exit}${time} · ${node}`);
+    const files = t.output_files ? ` · ${t.output_files} output file${t.output_files === 1 ? '' : 's'}` : '';
+    lines.push('', `━━ Task ${t.seq + 1} · ${t.status}${exit}${time} · ${node}${files}`);
     if (t.stdout) {
       lines.push(t.stdout.replace(/\s+$/, ''));
     }

@@ -8,6 +8,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The extension, the platform and the web dashboard now share one version
 number. **Set Up Platform** downloads platform release `v2.0.0`.
 
+### Added
+- **Run Project on Workers…** (Explorer folder menu and Command Palette): send
+  a whole folder (modules, configs, `requirements.txt`) and run a command in
+  it, one task per input. The requirements are installed on each worker; the
+  folder is uploaded once and not again while it is unchanged.
+- **Download Project Outputs**: each task's `outputs/` folder, unpacked into
+  `distributed-results/<run>/task-NNN/`.
+- **Set Environment Cache…** on a worker: keep built environments for later
+  tasks (removed with the worker).
+- `distributed.json` accepts a `project` block (command, requirements,
+  outputs, exclude, datasets); a project-only file is valid.
+- Project runs are named by their command in the views, and their output
+  shows how many files each task brought back.
+
 ### Changed
 - The platform stores datasets as plain files in a Docker volume instead of
   HDFS. Setup starts 6 containers instead of 10, the platform is ready about

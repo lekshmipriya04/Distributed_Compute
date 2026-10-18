@@ -57,6 +57,16 @@ class SSHExecutorSettings(BaseServiceSettings):
     # Runtime ids (see runtimes.py) users may select. ["*"] = every registered
     # runtime, including "custom".
     allowed_runtimes: list[str] = Field(default_factory=lambda: ["*"])
+
+    # --- projects (a folder + command, see projects.py) --------------------
+    # Bundles, dataset copies and task outputs are kept here (a Docker volume).
+    project_data_dir: str = Field(default="/var/lib/distributed-compute")
+    max_bundle_bytes: int = Field(default=200 * 1024 * 1024, ge=1024)
+    max_bundle_unpacked_bytes: int = Field(default=2 * 1024 * 1024 * 1024, ge=1024)
+    max_bundle_files: int = Field(default=50_000, ge=1)
+    # Per task: files from the output folders beyond this are left out.
+    max_project_output_bytes: int = Field(default=500 * 1024 * 1024, ge=1024)
+    env_build_timeout_seconds: int = Field(default=1800, ge=10)
     lease_ttl_seconds: int = Field(default=3600, ge=1)
     # How often the lease/stale-job recovery loop runs.
     recovery_interval_seconds: int = Field(default=60, ge=5)

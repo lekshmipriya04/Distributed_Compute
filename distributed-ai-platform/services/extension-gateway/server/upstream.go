@@ -102,6 +102,7 @@ type upNode struct {
 	AllocGPUFraction    *float64          `json:"allocated_gpu_fraction"`
 	Runtimes            map[string]string `json:"runtimes"`
 	ResourceEnforcement string            `json:"resource_enforcement"`
+	EnvCacheGB          *float64          `json:"env_cache_gb"`
 	AllocatedCPU        int               `json:"allocated_cpu"`
 	AllocatedMemoryGB   float64           `json:"allocated_memory_gb"`
 	Status              string            `json:"status"`
@@ -134,18 +135,32 @@ type upRuntimeList struct {
 }
 
 type upBatch struct {
-	ID             string  `json:"id"`
-	Runtime        string  `json:"runtime"`
-	Status         string  `json:"status"`
-	Message        *string `json:"message"`
-	Total          int     `json:"total"`
-	Completed      int     `json:"completed"`
-	Failed         int     `json:"failed"`
-	Cancelled      int     `json:"cancelled"`
-	CPUPerTask     int     `json:"cpu_per_task"`
-	TimeoutSeconds int     `json:"timeout_seconds"`
-	CreatedAt      upTime  `json:"created_at"`
-	FinishedAt     *upTime `json:"finished_at"`
+	ID             string     `json:"id"`
+	Runtime        string     `json:"runtime"`
+	Status         string     `json:"status"`
+	Message        *string    `json:"message"`
+	Total          int        `json:"total"`
+	Completed      int        `json:"completed"`
+	Failed         int        `json:"failed"`
+	Cancelled      int        `json:"cancelled"`
+	CPUPerTask     int        `json:"cpu_per_task"`
+	TimeoutSeconds int        `json:"timeout_seconds"`
+	CreatedAt      upTime     `json:"created_at"`
+	FinishedAt     *upTime    `json:"finished_at"`
+	Project        *upProject `json:"project"`
+}
+
+type upProject struct {
+	BundleID     string          `json:"bundle_id"`
+	Command      string          `json:"command"`
+	Requirements *string         `json:"requirements,omitempty"`
+	Outputs      []string        `json:"outputs,omitempty"`
+	Datasets     []upProjectData `json:"datasets,omitempty"`
+}
+
+type upProjectData struct {
+	DatasetID string  `json:"dataset_id"`
+	Path      *string `json:"path,omitempty"`
 }
 
 type upBatchList struct {
@@ -153,15 +168,16 @@ type upBatchList struct {
 }
 
 type upBatchCreate struct {
-	Code            string   `json:"code"`
-	Inputs          []string `json:"inputs,omitempty"`
-	NodeIDs         []string `json:"node_ids,omitempty"`
-	Runtime         string   `json:"runtime"`
-	CustomCommand   string   `json:"custom_command,omitempty"`
-	CustomFilename  string   `json:"custom_filename,omitempty"`
-	CPUPerTask      int      `json:"cpu_per_task,omitempty"`
-	TimeoutSeconds  int      `json:"timeout_seconds,omitempty"`
-	ExecutionPolicy string   `json:"execution_policy,omitempty"`
+	Code            string     `json:"code"`
+	Inputs          []string   `json:"inputs,omitempty"`
+	NodeIDs         []string   `json:"node_ids,omitempty"`
+	Runtime         string     `json:"runtime"`
+	CustomCommand   string     `json:"custom_command,omitempty"`
+	CustomFilename  string     `json:"custom_filename,omitempty"`
+	CPUPerTask      int        `json:"cpu_per_task,omitempty"`
+	TimeoutSeconds  int        `json:"timeout_seconds,omitempty"`
+	ExecutionPolicy string     `json:"execution_policy,omitempty"`
+	Project         *upProject `json:"project,omitempty"`
 }
 
 // upNodeUpdate is ssh-executor's NodeUpdateRequest (nil = unchanged).
@@ -171,6 +187,7 @@ type upNodeUpdate struct {
 	AllocatedGPUCount    *int     `json:"allocated_gpu_count,omitempty"`
 	AllocatedGPUMemoryGB *float64 `json:"allocated_gpu_memory_gb,omitempty"`
 	Status               *string  `json:"status,omitempty"`
+	EnvCacheGB           *float64 `json:"env_cache_gb,omitempty"`
 }
 
 // upTime accepts the ISO-8601 variants FastAPI/pydantic emit (with or without
@@ -250,6 +267,7 @@ func mapNode(n upNode) ComputeNode {
 	out.GPUAllocatableCount = n.AllocGPUCount
 	out.GPUMemoryAllocatableGB = n.AllocGPUMemoryGB
 	out.GPUFraction = n.AllocGPUFraction
+	out.EnvCacheGB = n.EnvCacheGB
 	switch n.ResourceEnforcement {
 	case "strict", "best_effort":
 		out.ResourceEnforcement = n.ResourceEnforcement
@@ -293,7 +311,41 @@ func mapBatch(b upBatch) Execution {
 	if b.Message != nil {
 		e.Message = *b.Message
 	}
+	if p := b.Project; p != nil {
+		spec := &ProjectSpec{BundleID: p.BundleID, Command: p.Command, Outputs: p.Outputs}
+		if p.Requirements != nil {
+			spec.Requirements = *p.Requirements
+		}
+		for _, d := range p.Datasets {
+			item := ProjectDataset{DatasetID: d.DatasetID}
+			if d.Path != nil {
+				item.Path = *d.Path
+			}
+			spec.Datasets = append(spec.Datasets, item)
+		}
+		e.Project = spec
+	}
 	return e
+}
+
+// toUpProject maps the extension's project onto ssh-executor's (nil stays nil).
+func toUpProject(p *ProjectSpec) *upProject {
+	if p == nil {
+		return nil
+	}
+	out := &upProject{BundleID: p.BundleID, Command: p.Command, Outputs: p.Outputs}
+	if p.Requirements != "" {
+		out.Requirements = &p.Requirements
+	}
+	for _, d := range p.Datasets {
+		item := upProjectData{DatasetID: d.DatasetID}
+		if d.Path != "" {
+			path := d.Path
+			item.Path = &path
+		}
+		out.Datasets = append(out.Datasets, item)
+	}
+	return out
 }
 
 func mapRuntime(r upRuntime) Runtime {
@@ -351,6 +403,7 @@ func (s *UpstreamStore) UpdateNodeSlice(ctx context.Context, id string, req Node
 		AllocatedGPUCount:    req.GPUAllocatableCount,
 		AllocatedGPUMemoryGB: req.GPUMemoryAllocatableGB,
 		Status:               req.Status,
+		EnvCacheGB:           req.EnvCacheGB,
 	}
 	var n upNode
 	if err := s.do(ctx, http.MethodPatch, "/nodes/"+url.PathEscape(id), body, &n); err != nil {
@@ -444,6 +497,7 @@ func (s *UpstreamStore) CreateExecution(ctx context.Context, req ExecutionReques
 		CPUPerTask:      req.CPUPerTask,
 		TimeoutSeconds:  req.TimeoutSeconds,
 		ExecutionPolicy: req.ExecutionPolicy,
+		Project:         toUpProject(req.Project),
 	}
 	var b upBatch
 	if err := s.do(ctx, http.MethodPost, "/batches", body, &b); err != nil {

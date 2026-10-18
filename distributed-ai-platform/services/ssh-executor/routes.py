@@ -15,15 +15,16 @@ import time
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from fastapi.responses import Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import desc, select
 from sqlalchemy.orm import undefer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import get_settings
 from database import get_db_manager
-from tasks import TERMINAL_BATCH_STATUSES, BatchService, dispatch_batch
+from projects import BundleError, BundleTooLarge
+from tasks import TERMINAL_BATCH_STATUSES, BatchService, dispatch_batch, project_nodes, project_stores
 from leases import LeaseService
 import leases as execution_manager
 from models import TrainingRun
@@ -35,6 +36,7 @@ from schemas import (
     BatchListResponse,
     BatchResponse,
     BatchTasksResponse,
+    BundleResponse,
     NodeConnectRequest,
     NodeConnectResponse,
     NodeDeleteResponse,
@@ -47,6 +49,7 @@ from schemas import (
     NodeResecureRequest,
     NodeResponse,
     NodeUpdateRequest,
+    ProjectSpec,
     RuntimeInfo,
     RuntimeListResponse,
     TaskResponse,
@@ -136,6 +139,7 @@ def _node_response(node) -> NodeResponse:
             getattr(node, "allocated_gpu_memory_gb", 0.0),
             node.gpu_memory_gb,
         ),
+        env_cache_gb=float(getattr(node, "env_cache_gb", 0.0) or 0.0),
         status=node.status,
         health_status=node.health_status,
         last_health_check=node.last_health_check,
@@ -419,29 +423,32 @@ async def _start_batch(
     session: AsyncSession,
 ):
     settings = get_settings()
-    try:
-        validate_execution_request(
-            request.code,
-            request.inputs,
-            runtime=request.runtime,
-            allowed_runtimes=settings.allowed_runtimes,
-            custom_command=request.custom_command,
-            custom_filename=request.custom_filename,
-            timeout_seconds=request.timeout_seconds,
-            max_timeout_seconds=settings.max_task_timeout_seconds,
-            max_code_bytes=settings.max_code_bytes,
-            max_inputs=settings.max_inputs_per_batch,
+    if request.project is not None:
+        await _check_project_request(request, user, session, settings)
+    else:
+        try:
+            validate_execution_request(
+                request.code,
+                request.inputs,
+                runtime=request.runtime,
+                allowed_runtimes=settings.allowed_runtimes,
+                custom_command=request.custom_command,
+                custom_filename=request.custom_filename,
+                timeout_seconds=request.timeout_seconds,
+                max_timeout_seconds=settings.max_task_timeout_seconds,
+                max_code_bytes=settings.max_code_bytes,
+                max_inputs=settings.max_inputs_per_batch,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        nodes = await execution_manager.online_nodes(
+            session, user.get("sub"), request.node_ids or None
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    nodes = await execution_manager.online_nodes(
-        session, user.get("sub"), request.node_ids or None
-    )
-    if not execution_manager.select_runtime_nodes(nodes, request.runtime):
-        raise HTTPException(
-            status_code=400,
-            detail=f"No selected online node has runtime '{request.runtime}'",
-        )
+        if not execution_manager.select_runtime_nodes(nodes, request.runtime):
+            raise HTTPException(
+                status_code=400,
+                detail=f"No selected online node has runtime '{request.runtime}'",
+            )
     timeout_seconds = min(
         request.timeout_seconds or settings.task_timeout_seconds,
         settings.max_task_timeout_seconds,
@@ -451,6 +458,87 @@ async def _start_batch(
     )
     background.add_task(dispatch_batch, batch.id, request.node_ids or None)
     return batch
+
+
+async def _check_project_request(request: BatchCreateRequest, user: dict, session: AsyncSession, settings) -> None:
+    """A project needs its bundle on the master and a POSIX node with python3."""
+    allowed = settings.allowed_runtimes
+    if "*" not in allowed and "project" not in allowed:
+        raise HTTPException(status_code=400, detail="Projects are not allowed on this platform (allowed_runtimes)")
+    if len(request.inputs) > settings.max_inputs_per_batch:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many inputs ({len(request.inputs)} > {settings.max_inputs_per_batch})",
+        )
+    if request.timeout_seconds and request.timeout_seconds > settings.max_task_timeout_seconds:
+        raise HTTPException(
+            status_code=400,
+            detail=f"timeout_seconds {request.timeout_seconds} exceeds the maximum of {settings.max_task_timeout_seconds}",
+        )
+    bundles, _outputs, _datasets = project_stores(settings)
+    if not bundles.exists(user.get("sub"), request.project.bundle_id):
+        raise HTTPException(status_code=400, detail="Unknown bundle_id: upload the project with POST /bundles first")
+    nodes = await execution_manager.online_nodes(session, user.get("sub"), request.node_ids or None)
+    if not project_nodes(nodes):
+        raise HTTPException(
+            status_code=400,
+            detail="Projects need a Linux or macOS node with python3; none of the selected online nodes has both",
+        )
+
+
+@batches_router.post(
+    "/bundles",
+    response_model=BundleResponse,
+    status_code=201,
+    dependencies=[Depends(rate_limit("bundle", 60))],
+)
+async def upload_bundle(request: Request, user: dict = Depends(get_current_user)):
+    """Store a project archive (.tar.gz, raw request body). Its id is its sha256."""
+    settings = get_settings()
+    bundles, _outputs, _datasets = project_stores(settings)
+    try:
+        info = await bundles.receive(
+            user.get("sub"), request.stream(),
+            max_bytes=settings.max_bundle_bytes,
+            max_unpacked_bytes=settings.max_bundle_unpacked_bytes,
+            max_members=settings.max_bundle_files,
+        )
+    except BundleError as exc:
+        raise HTTPException(status_code=413 if isinstance(exc, BundleTooLarge) else 400, detail=str(exc))
+    return BundleResponse(**info)
+
+
+@batches_router.get("/bundles/{bundle_id}", response_model=BundleResponse)
+async def get_bundle(bundle_id: str, user: dict = Depends(get_current_user)):
+    """200 when this owner already uploaded the archive with that sha256."""
+    bundles, _outputs, _datasets = project_stores(get_settings())
+    if not bundles.exists(user.get("sub"), bundle_id):
+        raise HTTPException(status_code=404, detail="Bundle not found")
+    return BundleResponse(id=bundle_id, size_bytes=bundles.path(user.get("sub"), bundle_id).stat().st_size)
+
+
+@batches_router.get("/batches/{batch_id}/tasks/{task_id}/outputs")
+async def download_task_outputs(
+    batch_id: UUID,
+    task_id: UUID,
+    user: dict = Depends(get_current_user),
+    service: BatchService = Depends(get_batch_service),
+):
+    """The files a project task wrote to its output folders, as a .tar.gz."""
+    batch = await service.get_batch(batch_id, user.get("sub"))
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    task = next((t for t in await service.list_tasks(batch_id) if t.id == task_id), None)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    _bundles, outputs, _datasets = project_stores(get_settings())
+    path = outputs.path(str(task.id))
+    if not task.output_files or not path.is_file():
+        raise HTTPException(status_code=404, detail="This task brought back no output files")
+    return FileResponse(
+        path, media_type="application/gzip",
+        filename=f"outputs-{str(batch.id)[:8]}-task{task.seq + 1}.tar.gz",
+    )
 
 
 @batches_router.get("/batches", response_model=BatchListResponse)
@@ -528,6 +616,7 @@ async def retry_batch(
         cpu_per_task=batch.cpu_per_task,
         timeout_seconds=batch.timeout_seconds,
         execution_policy=batch.execution_policy,
+        project=ProjectSpec.model_validate_json(batch.project_json) if batch.project_json else None,
     )
     return await _start_batch(request, background, user, service, session)
 

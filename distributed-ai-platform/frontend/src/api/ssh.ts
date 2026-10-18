@@ -94,6 +94,8 @@ export interface NodeUpdateRequest {
   allocated_memory_gb?: number | null;
   allocated_gpu_count?: number | null;
   allocated_gpu_memory_gb?: number | null;
+  /** Disk lent for cached project environments (0 turns the cache off). */
+  env_cache_gb?: number | null;
 }
 
 export type NodeAuthType = 'managed_key' | 'password' | 'private_key' | string;
@@ -116,6 +118,8 @@ export interface NodeResponse extends NodeCapabilities {
   allocated_gpu_fraction?: number | null;
   /** e.g. "torch-cuda"; null when no GPU runtime (torch) was found. */
   gpu_runtime?: string | null;
+  /** Disk lent for cached project environments in ~/.cache/distributed-compute (0 = off). */
+  env_cache_gb?: number | null;
   status: string;
   health_status: string;
   last_health_check?: string | null;
@@ -187,6 +191,22 @@ export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cance
 
 export const TERMINAL_BATCH_STATUSES: readonly string[] = ['completed', 'completed_with_errors', 'failed', 'cancelled'];
 
+/** Run a folder: the bundle from POST /bundles and a command run inside it. */
+export interface ProjectSpec {
+  bundle_id: string;
+  command: string;
+  requirements?: string | null;
+  outputs?: string[];
+  datasets?: { dataset_id: string; path?: string | null }[];
+}
+
+export interface BundleResponse {
+  id: string;
+  size_bytes: number;
+  files?: number | null;
+  unpacked_bytes?: number | null;
+}
+
 export interface BatchCreateRequest {
   code: string;
   inputs: string[];
@@ -197,6 +217,8 @@ export interface BatchCreateRequest {
   cpu_per_task: number;
   timeout_seconds?: number | null;
   execution_policy?: ExecutionPolicy;
+  /** Set to run a folder instead of `code` (the runtime becomes "project"). */
+  project?: ProjectSpec | null;
 }
 
 export interface TaskResponse {
@@ -212,6 +234,9 @@ export interface TaskResponse {
   started_at?: string | null;
   finished_at?: string | null;
   duration_ms?: number | null;
+  /** Project runs: files brought back from the output folders. */
+  output_files?: number | null;
+  output_bytes?: number | null;
 }
 
 export interface BatchResponse {
@@ -230,6 +255,7 @@ export interface BatchResponse {
   execution_policy?: ExecutionPolicy | string;
   created_at: string;
   finished_at?: string | null;
+  project?: ProjectSpec | null;
 }
 
 /** Human label for an execution policy id (falls back to the raw id). */
@@ -394,6 +420,17 @@ export const sshApi = {
 
   cancelBatch: (id: string) =>
     apiRequest<BatchResponse>(`${BASE}/batches/${id}/cancel`, { method: 'POST' }),
+
+  /** Upload a project's .tar.gz; the master keeps one copy per content hash. */
+  uploadBundle: (archive: Uint8Array) =>
+    apiRequest<BundleResponse>(`${BASE}/bundles`, {
+      method: 'POST',
+      body: new Blob([archive as BlobPart], { type: 'application/gzip' }),
+      isFormData: true,
+    }),
+
+  downloadTaskOutputs: (batchId: string, taskId: string, seq: number) =>
+    downloadFile(`${BASE}/batches/${batchId}/tasks/${taskId}/outputs`, `outputs-task${seq + 1}.tar.gz`),
 
   // --- training ----------------------------------------------------------------
   startTraining: (body: TrainRequest) =>

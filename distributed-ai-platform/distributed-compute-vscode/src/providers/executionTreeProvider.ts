@@ -62,7 +62,8 @@ export class ExecutionTreeProvider implements vscode.TreeDataProvider<ExecTreeIt
     item.tooltip = `${e.id}\nStarted ${new Date(e.createdAt).toLocaleString()}`;
     item.iconPath = new vscode.ThemeIcon(STATUS_ICON[e.status] ?? 'circle-outline');
     item.id = `${this.detailed ? 'exec' : 'job'}:${e.id}`;
-    item.contextValue = `execution:${e.status}:${isTerminal(e.status) ? 'terminal' : 'active'}`;
+    // "execution:project:…" marks project runs (they can have output files).
+    item.contextValue = `execution:${e.project ? 'project:' : ''}${e.status}:${isTerminal(e.status) ? 'terminal' : 'active'}`;
     item.command = { command: 'distributedCompute.viewLogs', title: 'View Logs', arguments: [element] };
     return item;
   }

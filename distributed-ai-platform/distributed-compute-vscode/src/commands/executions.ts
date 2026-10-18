@@ -424,7 +424,7 @@ export async function runInParallel(deps: CommandDeps, logs: ExecutionLogProvide
   }
 }
 
-async function pickInputs(): Promise<string[] | undefined> {
+export async function pickInputs(title = 'Run in Parallel (2/4): tasks'): Promise<string[] | undefined> {
   const how = await vscode.window.showQuickPick(
     [
       { label: '$(list-unordered) Type the inputs', description: 'Comma-separated, one task each', id: 'list' },
@@ -432,7 +432,7 @@ async function pickInputs(): Promise<string[] | undefined> {
       { label: '$(copy) Same program N times', description: 'Each task gets its number (1…N) as input', id: 'copies' },
       { label: '$(play) Just once', description: 'A single task', id: 'once' },
     ],
-    { title: 'Run in Parallel (2/4): tasks', ignoreFocusOut: true },
+    { title, ignoreFocusOut: true },
   );
   switch (how?.id) {
     case 'list': {

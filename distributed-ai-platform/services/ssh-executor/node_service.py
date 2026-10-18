@@ -78,6 +78,16 @@ _CAPS_TIMEOUT = 20
 _KEY_OP_TIMEOUT = 30
 
 
+def _remove_worker_cache(t) -> None:
+    """Delete cached project environments (best effort; the key removal matters more)."""
+    from projects import WORKER_CACHE_DIR
+
+    try:
+        t.exec(f'rm -rf "$HOME"/{WORKER_CACHE_DIR}', timeout=_KEY_OP_TIMEOUT)
+    except Exception as exc:
+        logger.warning("worker_cache_removal_failed", error=str(exc))
+
+
 # --- errors (mapped to HTTP in routes_nodes) ---------------------------------
 class NodeServiceError(Exception):
     status_code = 400
@@ -850,6 +860,8 @@ class NodeService:
             cpu, mem, node.detected_cpu, node.detected_memory_gb
         )
         _clamp_gpu(node, request.allocated_gpu_count, request.allocated_gpu_memory_gb)
+        if request.env_cache_gb is not None:
+            node.env_cache_gb = float(request.env_cache_gb)
         await self._db.commit()
         await self._db.refresh(node)
         return node
@@ -865,6 +877,8 @@ class NodeService:
                 try:
                     _connect(t, key_auth=node.auth_type != "password")
                     os_type = node.os_type or detect_os(t, timeout=self._settings.connect_timeout)
+                    if os_type != "windows":
+                        _remove_worker_cache(t)
                     return remove_authorized_key(t, os_type, node.key_comment, timeout=_KEY_OP_TIMEOUT)
                 finally:
                     t.close()

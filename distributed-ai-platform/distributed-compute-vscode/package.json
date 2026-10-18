@@ -83,7 +83,7 @@
       },
       {
         "view": "distributedCompute.jobs",
-        "contents": "No runs yet. Open a file and run it on your workers.\n[$(run-all) Run File in Parallel](command:distributedCompute.runDistributed)",
+        "contents": "No runs yet. Run a file, or a whole folder with its requirements, on your workers.\n[$(run-all) Run File in Parallel](command:distributedCompute.runDistributed)\n[$(rocket) Run Project on Workers](command:distributedCompute.runProject)",
         "when": "distributedCompute.connected"
       },
       {
@@ -370,6 +370,23 @@
         "category": "Distributed Compute"
       },
       {
+        "command": "distributedCompute.runProject",
+        "title": "Run Project on Workers…",
+        "category": "Distributed Compute",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "distributedCompute.downloadOutputs",
+        "title": "Download Project Outputs",
+        "category": "Distributed Compute",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "distributedCompute.setEnvironmentCache",
+        "title": "Set Environment Cache…",
+        "category": "Distributed Compute"
+      },
+      {
         "command": "distributedCompute.initProject",
         "title": "Initialize Project",
         "category": "Distributed Compute"
@@ -527,6 +544,10 @@
         {
           "command": "distributedCompute.trainWithModelFile",
           "when": "editorLangId == python"
+        },
+        {
+          "command": "distributedCompute.setEnvironmentCache",
+          "when": "false"
         }
       ],
       "view/title": [
@@ -582,6 +603,10 @@
           "when": "view == distributedCompute.nodes && viewItem =~ /^node:/"
         },
         {
+          "command": "distributedCompute.setEnvironmentCache",
+          "when": "view == distributedCompute.nodes && viewItem =~ /^node:/"
+        },
+        {
           "command": "distributedCompute.drainNode",
           "when": "view == distributedCompute.nodes && viewItem =~ /^node:(online|busy|degraded)$/"
         },
@@ -626,6 +651,15 @@
           "when": "viewItem =~ /^execution:.*:terminal$/"
         },
         {
+          "command": "distributedCompute.downloadOutputs",
+          "when": "viewItem =~ /^execution:project:.*:terminal$/"
+        },
+        {
+          "command": "distributedCompute.downloadOutputs",
+          "when": "viewItem =~ /^execution:project:.*:terminal$/",
+          "group": "inline"
+        },
+        {
           "command": "distributedCompute.downloadModel",
           "when": "view == distributedCompute.training && viewItem =~ /^training:completed:/",
           "group": "inline"
@@ -656,6 +690,11 @@
           "command": "distributedCompute.trainWithModelFile",
           "when": "resourceLangId == python",
           "group": "distributedCompute@2"
+        },
+        {
+          "command": "distributedCompute.runProject",
+          "when": "explorerResourceIsFolder",
+          "group": "distributedCompute@1"
         }
       ],
       "editor/context": [

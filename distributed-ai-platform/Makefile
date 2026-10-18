@@ -29,18 +29,19 @@ migrate-datasets: config/.env
 	@echo "Done. Once you have checked your datasets, the old HDFS volumes can go:"
 	@echo "  docker volume rm $$(docker compose --profile hdfs volumes --format '{{.Name}}' | grep hadoop_ | tr '\n' ' ')"
 
-# Copies the database and the dataset files to backups/<date>/.
+# Copies the database, the dataset files and project task outputs to backups/<date>/.
 backup:
 	@mkdir -p backups/$$(date +%Y%m%d-%H%M%S) && d=backups/$$(ls -1 backups | tail -1) && \
 	docker compose exec -T postgres sh -c 'pg_dump -U "$$POSTGRES_USER" "$$POSTGRES_DB"' > $$d/database.sql && \
 	docker compose exec -T storage-service tar czf - -C /data . > $$d/datasets.tar.gz && \
+	docker compose exec -T ssh-executor sh -c 'mkdir -p /var/lib/distributed-compute/outputs && tar czf - -C /var/lib/distributed-compute outputs' > $$d/outputs.tar.gz && \
 	echo "Backed up to $$d"
 
 # Stops everything and keeps your data (database, datasets, registered nodes).
 down:
 	docker compose --profile dev --profile hdfs down
 
-# Stops everything and DELETES the database, dataset and HDFS volumes.
+# Stops everything and DELETES the database, dataset, project and HDFS volumes.
 reset:
 	docker compose --profile dev --profile hdfs down -v
 

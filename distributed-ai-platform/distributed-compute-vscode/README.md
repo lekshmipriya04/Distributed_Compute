@@ -1,9 +1,10 @@
 # Distributed AI Compute for VS Code
 
-**Run your code and train models on the computers you already have, from VS
-Code.** Lend a few cores of a lab machine, an old laptop or a server, then run
-any file on all of them in parallel and watch every task's output live. No
-terminal or browser needed.
+**Run your code and your own models on the computers you already have, from
+VS Code.** Lend a few cores of a lab machine, an old laptop or a server, then
+run any file, or a whole project folder with its `requirements.txt`, on all of
+them in parallel and watch every task's output live. No terminal or browser
+needed.
 
 Workers need only `sshd` and `python3`; **nothing is installed on them.** You
 type a worker's password once: the platform installs a restricted key and
@@ -15,7 +16,8 @@ forgets the password.
 - [1. Start the platform](#1-start-the-platform)
 - [2. Add a worker](#2-add-a-worker)
 - [3. Run code in parallel](#3-run-code-in-parallel)
-- [4. Train a model](#4-train-a-model)
+- [4. Run your own project (new in 2.0)](#4-run-your-own-project-new-in-20)
+- [5. Train with the built-in trainer](#5-train-with-the-built-in-trainer)
 - [Use it well](#use-it-well) · [All commands](#all-commands) · [Settings](#settings)
 - [Teams and remote masters](#teams-and-remote-masters) · [Troubleshooting](#troubleshooting) · [Security and privacy](#security-and-privacy)
 
@@ -140,7 +142,66 @@ only the ones that failed) or **Save Execution Results** (one file per task in
 
 ![Run actions](media/readme/14-execution-actions.png)
 
-## 4. Train a model
+## 4. Run your own project (new in 2.0)
+
+For real work your code is more than one file: modules, configs, a
+`requirements.txt`. **Run Project on Workers…** sends the whole folder.
+
+1. Right-click the folder in the Explorer → **Run Project on Workers…**, or run
+   it from the Command Palette (it uses the workspace folder).
+2. Enter the **command** to run inside the folder. It is guessed from your
+   files (`python3 train.py` here), and skipped when `distributed.json` has a
+   `project` block (below).
+
+   ![The command to run in the folder](media/readme/20-project-command.png)
+
+3. Choose the **tasks** (one input per task: here one value of C per task)
+   and the **workers**. Projects run on Linux and macOS workers with Python 3.
+
+The folder is packed without `.git`, caches, virtual environments and
+`outputs/` (in a git repository `.gitignore` applies too), and uploaded once:
+if nothing changed since the last run, it is not sent again. On each worker
+the requirements are installed and your command runs inside the folder. The
+output opens beside your code as for any run, with a line saying how the
+environment was built:
+
+![Three scikit-learn tasks on two workers](media/readme/21-project-output.png)
+
+Whatever a task writes to `outputs/` (`$DC_OUTPUT_DIR`) comes back. Run
+**Download Project Outputs** (or the download icon on the run) to unpack every
+task's files into `distributed-results/<run>/task-001/…`:
+
+![The trained models and metrics, downloaded into the workspace](media/readme/22-project-outputs.png)
+
+Inside a task you have: its input on standard input and in `$DC_INPUT_FILE`,
+`$DC_TASK_INDEX` and `$DC_TASK_COUNT`, `$DC_OUTPUT_DIR`, and `$DC_DATA_DIR`
+for datasets listed in `distributed.json`.
+
+**Save the settings in `distributed.json`**, so a run asks only for the tasks
+and workers:
+
+```json
+{
+  "version": 1,
+  "name": "my-project",
+  "project": {
+    "command": "python train.py --epochs 3",
+    "requirements": "requirements.txt",
+    "outputs": ["outputs"],
+    "exclude": ["data/raw/", "*.ckpt"],
+    "datasets": [{ "dataset": "<dataset id>", "path": "data/train.csv" }]
+  }
+}
+```
+
+**Environment cache.** By default each task builds its environment in its
+sandbox and it is deleted afterwards. Right-click a worker → **Set Environment
+Cache…** to let it keep environments (in `~/.cache/distributed-compute`, up to
+the size you choose); later tasks with the same requirements then start in
+about a second instead of rebuilding. The cache is deleted when you remove the
+worker.
+
+## 5. Train with the built-in trainer
 
 Run **Submit Training Job** (also in the Training Runs view, or right-click a
 `.csv`, `.json` or `.parquet` file → **Train on This Dataset**).
@@ -188,8 +249,8 @@ Training Again** repeats it in one click.
 - **Cores per task.** Use 1 for single-threaded scripts; more only if your code
   uses several threads or processes.
 - **Make tasks independent.** Each task runs in its own temporary directory,
-  deleted afterwards. Print your results; they are kept in the output and can
-  be saved with **Save Execution Results**.
+  deleted afterwards. Print your results, or in a project write files to
+  `outputs/` and use **Download Project Outputs**.
 - **Retry only what failed.** After a partly failed run, **Retry Execution** →
   *only the failed tasks* runs just those inputs again.
 - **Drain before maintenance.** **Drain Node** lets running tasks finish and
@@ -209,8 +270,8 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type
 | Area | Commands |
 |---|---|
 | Platform | Set Up Platform on This Computer, Stop Platform on This Computer, Connect to Master, Disconnect from Master, Configure Master URL, Configure Authentication, Show Connection Status, Show Cluster Status, Show Diagnostics |
-| Workers | Add Compute Node, Test Node Connection, Detect Node Hardware Again, Configure Resource Slice, Rotate Node Key, Drain Node, Resume Node, Remove Node, Refresh Nodes |
-| Runs | Run Python File, Run File with Runtime…, Run File in Parallel…, View Execution Output, Cancel Execution, Retry Execution, Save Execution Results |
+| Workers | Add Compute Node, Test Node Connection, Detect Node Hardware Again, Configure Resource Slice, Set Environment Cache…, Rotate Node Key, Drain Node, Resume Node, Remove Node, Refresh Nodes |
+| Runs | Run Project on Workers…, Download Project Outputs, Run Python File, Run File with Runtime…, Run File in Parallel…, View Execution Output, Cancel Execution, Retry Execution, Save Execution Results |
 | Training | Submit Training Job, Train on This Dataset, Train with This Model File, New Custom Model File, Run Training Again, Enable / Disable Spark + Ray Engine |
 | Project | Initialize Project, Validate Project Configuration (`distributed.json`) |
 
@@ -256,6 +317,9 @@ also use the web dashboard.
 | "Wrong password" / password logins refused | Try again, or leave the password empty to get a command to install the key yourself. |
 | A worker shows `unreachable` | **Test Node Connection**. If it moved to a new address, remove it and add it again. |
 | A language is missing from the list | Install it on the worker, then **Detect Node Hardware Again**. |
+| A project task fails with "[dc] Building the environment failed" | pip's message follows: fix the package name or version in `requirements.txt`. Packages that need a compiler need a worker that has one, or a version with ready-made wheels. |
+| "python3 -m venv is not available on this worker" | On Debian/Ubuntu install `python3-venv` on the worker (or [uv](https://docs.astral.sh/uv/)). |
+| "The folder holds more than 500 MB" | Upload large data as a dataset and list it in `project.datasets`; add big folders to `project.exclude`. |
 | Anything else | **Show Diagnostics** shows what the extension did; include it (without passwords or tokens) in an [issue](https://github.com/lekshmipriya04/Distributed_Compute/issues). |
 
 ## Security and privacy

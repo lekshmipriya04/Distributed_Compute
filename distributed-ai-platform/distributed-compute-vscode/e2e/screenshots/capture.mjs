@@ -167,8 +167,12 @@ async function firstStart() {
 }
 
 async function everyday() {
+  const example = path.resolve(root, '..', 'examples', 'sklearn-sweep');
   const files = {
     'square.py': 'import sys\n\nn = int(sys.stdin.read().strip() or 7)\nprint(f"{n} squared is {n * n}")\n',
+    // A real project for the "Run Project on Workers" steps (examples/sklearn-sweep).
+    'train.py': fs.readFileSync(path.join(example, 'train.py'), 'utf8'),
+    'requirements.txt': fs.readFileSync(path.join(example, 'requirements.txt'), 'utf8'),
   };
   const { app, win } = await launch({ 'distributedCompute.masterUrl': GATEWAY }, files);
   try {
@@ -261,6 +265,34 @@ async function everydaySteps(win) {
     await filteredCommands(win, 'Distributed Compute: Execution');
     await shot(win, '14-execution-actions');
     await win.keyboard.press('Escape');
+
+    // Run the whole folder (train.py + requirements.txt) on the workers.
+    await win.keyboard.press(process.platform === 'darwin' ? 'Meta+P' : 'Control+P');
+    await quickInputBox(win).fill('train.py');
+    await win.locator('.quick-input-list .monaco-list-row', { hasText: 'train.py' }).first().waitFor();
+    await win.keyboard.press('Enter');
+    await win.locator('.monaco-editor .view-lines', { hasText: 'load_digits' }).first().waitFor();
+    await command(win, 'Distributed Compute: Run Project on Workers');
+    await step(win, 'command to run in the folder');
+    await shot(win, '20-project-command');
+    await win.keyboard.press('Enter');
+    await step(win, 'Run Project (2/3)');
+    await pick(win, 'Type the inputs');
+    await step(win, 'separated by commas');
+    await quickInputBox(win).fill('0.1, 1, 10');
+    await win.keyboard.press('Enter');
+    await step(win, 'Run Project (3/3)');
+    await win.keyboard.press('Enter');
+    await win.locator('.monaco-editor .view-lines', { hasText: '3/3 tasks finished' }).waitFor({ timeout: 480_000 });
+    await win.locator('.monaco-editor .view-lines', { hasText: 'accuracy' }).first().waitFor();
+    await shot(win, '21-project-output');
+    await command(win, 'Distributed Compute: Download Project Outputs');
+    await quickInput(win).locator('.monaco-list-row', { hasText: 'python3 train.py' }).first().click();
+    await win.locator('.notifications-toasts', { hasText: 'output file(s)' }).waitFor({ timeout: 60_000 });
+    await win.locator('.notifications-toasts .monaco-button', { hasText: 'Open Folder' }).click();
+    await win.locator('.explorer-folders-view .monaco-list-row', { hasText: 'model.joblib' }).first().waitFor({ timeout: 30_000 });
+    await shot(win, '22-project-outputs');
+    await openView(win); // back from the Explorer to the Distributed Compute views
 
     // Train a model on a dataset uploaded beforehand.
     await command(win, 'Distributed Compute: Submit Training Job');

@@ -52,11 +52,18 @@ addresses the others by container name.
 |---|---|---|
 | Connect (onboarding step 1) | none (host key read only) | Host key → SHA256 fingerprint shown to the user |
 | Provision (step 2) | Password, once, over the pinned host key | Appends `restrict <ed25519 pubkey> dp-platform:<id>` to authorized keys; capability and runtime detection |
-| Everything after | Managed Ed25519 key, pinned host key | Sandbox create, SFTP upload of code, input and runner, the launch command with stdin, stdout/stderr, cancel, cleanup, stale sweep, health check, refresh, key rotation and removal |
+| Everything after | Managed Ed25519 key, pinned host key | Sandbox create, SFTP upload of code, input and runner (projects: the folder's archive, datasets and the `dc_project.py` helper), the launch command with stdin, stdout/stderr, SFTP download of project outputs, cancel, cleanup, stale sweep, health check, refresh, key rotation and removal |
 
 Data in transit to a worker: the task code, the task input (stdin and
-`input.txt`), and for training a stdlib script plus one data shard. Nothing
-persists on the worker except the authorized-keys line.
+`input.txt`), for training a stdlib script plus one data shard, and for a
+project its folder and datasets. Nothing persists on the worker except the
+authorized-keys line, and project environments when the node lends an
+environment cache.
+
+**Worker → package index.** To build a project's environment the **worker**
+(not the master) downloads packages with pip or uv from PyPI or the indexes
+named in `requirements.txt`. Workers without internet access need a reachable
+mirror (`--index-url` in the requirements file) or packages already present.
 
 ## 3. Authentication summary
 
@@ -91,6 +98,16 @@ ssh-executor: lease each node (SELECT … FOR UPDATE) → slots per node
              → stdout/stderr/exit → rm -rf sandbox
 UI ─GET /batches/{id}/tasks (poll)─▶ per-task output
 UI ─POST /batches/{id}/cancel─▶ status cancelling → kill process group by exec id → cancelled
+```
+
+### 4.2b Run a project
+```
+client ─GET /bundles/<sha256>─▶ 404? ─POST /bundles (.tar.gz)─▶ ssh-executor (stored per owner)
+client ─POST /batches {project: {bundle_id, command, requirements, outputs, datasets}}─▶ 201
+ssh-executor: datasets fetched from storage-service as the owner (X-On-Behalf-Of)
+  per task: sandbox → upload archive, datasets, helper → unpack → build env (worker → PyPI)
+            → run command → pack outputs → SFTP download → rm -rf sandbox
+client ─GET /batches/{id}/tasks/{task_id}/outputs─▶ .tar.gz
 ```
 
 ### 4.3 Train

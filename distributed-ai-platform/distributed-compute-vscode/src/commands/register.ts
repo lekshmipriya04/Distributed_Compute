@@ -26,6 +26,7 @@ import {
   runnableEditor,
   viewLogs,
 } from './executions';
+import { downloadOutputs, runProject, setEnvironmentCache } from './projects';
 import {
   deleteRun,
   downloadModel,
@@ -77,6 +78,9 @@ export function registerCommands(deps: CommandDeps): void {
   reg('distributedCompute.cancelExecution', (...a) => cancelExecution(deps, a[0]));
   reg('distributedCompute.retryExecution', (...a) => retryExecution(deps, logs, a[0]));
   reg('distributedCompute.retrieveResults', (...a) => retrieveResults(deps, a[0]));
+  reg('distributedCompute.runProject', (...a) => runProject(deps, logs, a[0]));
+  reg('distributedCompute.downloadOutputs', (...a) => downloadOutputs(deps, a[0]));
+  reg('distributedCompute.setEnvironmentCache', (...a) => setEnvironmentCache(deps, extractNodeId(a[0])));
 
   reg('distributedCompute.addNode', () => addNode(deps));
   reg('distributedCompute.testNode', (...a) => testNode(deps, a[0]));
