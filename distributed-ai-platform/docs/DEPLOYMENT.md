@@ -1,16 +1,16 @@
 # Deployment plan: Distributed Compute
 
-Release runbook for **2.0.0**: the platform (Python services, Go gateway,
+Release runbook for **1.0.1**: the platform (Python services, Go gateway,
 Docker setup), the web dashboard and the VS Code extension
 (`aaron43210.distributed-ai-compute`). Steps are in order; each has a check
 that says it worked.
 
-**Versions.** From 2.0.0 everything shares one version number. The extension
+**Versions.** From 1.0.1 everything shares one version number. The extension
 downloads the platform release with its own version (`PLATFORM_RELEASE` in
-`distributed-compute-vscode/src/models/platform.ts`, tag `v2.0.0`); a unit
+`distributed-compute-vscode/src/models/platform.ts`, tag `v1.0.1`); a unit
 test fails if the two ever differ.
 
-**What 2.0.0 changes.** Datasets are stored as plain files in the Docker
+**What 1.0.1 changes.** Datasets are stored as plain files in the Docker
 volume `datasets` instead of HDFS. A fresh start runs 6 containers instead of
 10, reaches the first upload in about 23 s instead of 33 s, and uses about
 0.5 GB of memory instead of 1.9 GB (images 2.1 GB instead of 5.9 GB; measured
@@ -18,7 +18,7 @@ with `scripts/measure-startup.sh`). HDFS is still available with
 `make up-hdfs`. Existing installs move their datasets with
 `make migrate-datasets` (section 6).
 
-2.0.0 also adds **projects**: a whole folder with its `requirements.txt`
+1.0.1 also adds **projects**: a whole folder with its `requirements.txt`
 runs on the workers (VS Code **Run Project on Workers…**, the dashboard's
 **Project folder**, or the new `dc` command line in `clients/cli`); each
 worker builds the environment, and the files each task writes to `outputs/`
@@ -74,7 +74,7 @@ unusable), a wrong SSH password treated as an expired sign-in, low-contrast
 text, unlabelled form fields, broken layouts on phones, missing security
 headers on most responses, a Google Fonts request on every page, and HDFS
 containers being killed for lack of memory (heaps now capped; restarts
-automatic; HDFS is optional since 2.0.0).
+automatic; HDFS is optional since 1.0.1).
 
 ## 2. Before release (blocking)
 
@@ -107,13 +107,13 @@ automatic; HDFS is optional since 2.0.0).
 ## 3. Release
 
 1. **Tag the platform release.** The extension downloads the platform
-   release with its own version (`v2.0.0`), so this tag is what new users get.
+   release with its own version (`v1.0.1`), so this tag is what new users get.
    Without it they get the default branch.
    ```bash
-   git tag -a v2.0.0 -m "Distributed AI Compute 2.0.0"
-   git push origin v2.0.0
+   git tag -a v1.0.1 -m "Distributed AI Compute 1.0.1"
+   git push origin v1.0.1
    ```
-   Check: `git ls-remote --tags origin v2.0.0` shows the tag.
+   Check: `git ls-remote --tags origin v1.0.1` shows the tag.
 2. **Build the `.vsix` from the tag**, or take the `distributed-ai-compute-vsix`
    artifact from that commit's CI run. Always use `npm run package`: it points
    the README's images and links at
@@ -121,17 +121,17 @@ automatic; HDFS is optional since 2.0.0).
    images must already be on `main` (step 2.1).
    ```bash
    cd distributed-ai-platform/distributed-compute-vscode
-   npm ci && npm run package -- --out distributed-ai-compute-2.0.0.vsix
+   npm ci && npm run package -- --out distributed-ai-compute-1.0.1.vsix
    ```
 3. **Publish.**
    ```bash
-   npx vsce publish --packagePath distributed-ai-compute-2.0.0.vsix -p "$VSCE_PAT"
-   npx ovsx publish distributed-ai-compute-2.0.0.vsix -p "$OVSX_PAT"   # optional
+   npx vsce publish --packagePath distributed-ai-compute-1.0.1.vsix -p "$VSCE_PAT"
+   npx ovsx publish distributed-ai-compute-1.0.1.vsix -p "$OVSX_PAT"   # optional
    ```
    Check: within minutes the listing at
    `https://marketplace.visualstudio.com/items?itemName=aaron43210.distributed-ai-compute`
-   shows version 2.0.0 and every screenshot loads.
-4. **GitHub Release** for `v2.0.0`: attach the extension's 2.0.0 `.vsix`, paste the 2.0.0
+   shows version 1.0.1 and every screenshot loads.
+4. **GitHub Release** for `v1.0.1`: attach the extension's 1.0.1 `.vsix`, paste the 1.0.1
    section of the extension's `CHANGELOG.md`, add screenshots from `frontend/docs/images/` and the extension's `media/readme/`, and list
    the known limits from section 7.
 
@@ -140,7 +140,7 @@ automatic; HDFS is optional since 2.0.0).
 On one clean Windows, macOS and Linux machine each, with Docker installed:
 
 1. Install the extension from the Marketplace.
-2. Accept **Set Up Now**. It should start Docker if needed, download `v2.0.0`,
+2. Accept **Set Up Now**. It should start Docker if needed, download `v1.0.1`,
    build, start and connect. The first build takes several minutes.
 3. **Add Compute Node** with a real second machine on the network.
 4. **Run File in Parallel…** with a short script and 4 inputs; the output
@@ -151,7 +151,7 @@ On one clean Windows, macOS and Linux machine each, with Docker installed:
    on a phone on the same network (start with `BIND_ADDR=0.0.0.0 make up`
    for the phone): add a worker, run a task, train a model.
 
-Record the results in the GitHub Release. Any failure becomes 2.0.1.
+Record the results in the GitHub Release. Any failure becomes 1.0.2.
 
 ## 5. How users deploy the platform
 
@@ -181,15 +181,15 @@ sign-in, every port bound to `127.0.0.1`.
 non-admin account. Nothing is installed on them. Tasks run with that
 account's permissions, so never use an admin account.
 
-## 6. Upgrade from 1.x, and rollback
+## 6. Upgrade from 1.0.0, and rollback
 
-**Upgrade.** Datasets uploaded before 2.0.0 are in HDFS. Nothing is lost by
+**Upgrade.** Datasets uploaded before 1.0.1 are in HDFS. Nothing is lost by
 upgrading: those rows keep pointing at HDFS, and new uploads go to local
 files.
 
 ```bash
 make backup             # database + dataset files to backups/<date>/
-git pull                # or check out v2.0.0
+git pull                # or check out v1.0.1
 make up                 # rebuilds the changed images and starts without HDFS
 make migrate-datasets   # starts HDFS, copies each dataset, stops HDFS again
 ```
@@ -209,12 +209,12 @@ datasets downloaded byte for byte afterwards with HDFS stopped.
 **Rollback.**
 
 - **Extension:** `npx vsce unpublish` is a last resort. Prefer publishing
-  2.0.1 with the fix; users can also pick *Install Another Version…* in VS Code.
+  1.0.2 with the fix; users can also pick *Install Another Version…* in VS Code.
 - **Platform:** `make down`, check out the previous tag, `make up`. Data
-  volumes stay. 1.x reads datasets only from HDFS, so after
+  volumes stay. 1.0.0 reads datasets only from HDFS, so after
   `make migrate-datasets` also restore `database.sql` from the backup taken
   before the upgrade: its rows point at the HDFS copies, which the migration
-  kept. Datasets uploaded on 2.0.0 are then not visible in 1.x.
+  kept. Datasets uploaded on 1.0.1 are then not visible in 1.0.0.
   `make reset` deletes every volume; use it only if a schema change went
   wrong. Schema changes are additive (`ADD COLUMN IF NOT EXISTS`).
 
@@ -235,7 +235,7 @@ datasets downloaded byte for byte afterwards with HDFS stopped.
   master restart stops running tasks, and there is no multi-machine launcher
   (`torchrun`) yet.
 
-## 8. Next (2.1.0)
+## 8. Next (1.1.0)
 
 - Long jobs: tasks that keep running when the master restarts, longer time
   limits, and checkpoints that are restored on retry.

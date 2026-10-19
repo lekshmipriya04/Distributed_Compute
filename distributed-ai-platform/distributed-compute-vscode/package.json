@@ -2,7 +2,7 @@
   "name": "distributed-ai-compute",
   "displayName": "Distributed AI Compute",
   "description": "Run code and train models on your own machines over SSH, entirely from VS Code: one-click local setup, add and manage workers, run any language in parallel with live output, and train built-in, custom or Spark models.",
-  "version": "2.0.0",
+  "version": "1.0.1",
   "publisher": "aaron43210",
   "author": "AARON R, M R LEKSHMI PRIYA, ALEENA VJ",
   "contributors": [

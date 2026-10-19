@@ -360,7 +360,7 @@ and the grid-search candidates.
 - **PostgreSQL**: `datasets` (storage-service); `ssh_nodes`,
   `pending_provisions`, `resource_leases`, `task_batches`, `tasks`,
   `training_runs` (ssh-executor). The schema comes from `create_all` plus
-  idempotent `ADD COLUMN IF NOT EXISTS` statements (rows from before 2.0.0
+  idempotent `ADD COLUMN IF NOT EXISTS` statements (rows from before 1.0.1
   get `storage_backend = 'hdfs'`).
   Columns that the list does not cover need a fresh database (`make reset` drops
   the volumes) or a manual `ALTER`.

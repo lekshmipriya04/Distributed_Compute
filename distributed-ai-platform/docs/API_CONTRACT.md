@@ -163,7 +163,7 @@ stderr, attempts, started_at, finished_at, duration_ms, output_files,
 output_bytes}`; `output_files`/`output_bytes` are set for project tasks.
 `BatchResponse` carries `project` (the `ProjectSpec` below) for project runs.
 
-### 2.3 Projects (new in 2.0)
+### 2.3 Projects (new in 1.0.1)
 
 A project runs a folder instead of one file. Upload it once, then start a
 batch with `project` set; `runtime` becomes `project` and `code` is ignored.
@@ -288,7 +288,7 @@ honours that header only when the token has `internal: true`, and then scopes to
 that owner.
 
 Each dataset carries `storage_backend` (`local`, or `hdfs` for datasets stored
-in HDFS, including every dataset from before 2.0.0) and `storage_path` (the
+in HDFS, including every dataset from before 1.0.1) and `storage_path` (the
 file's key in that store; `hdfs_path` holds the same value and is kept for
 older clients). Uploads and downloads are streamed. Storage errors:
 

@@ -16,7 +16,7 @@ forgets the password.
 - [1. Start the platform](#1-start-the-platform)
 - [2. Add a worker](#2-add-a-worker)
 - [3. Run code in parallel](#3-run-code-in-parallel)
-- [4. Run your own project (new in 2.0)](#4-run-your-own-project-new-in-20)
+- [4. Run your own project (new in 1.0.1)](#4-run-your-own-project-new-in-101)
 - [5. Train with the built-in trainer](#5-train-with-the-built-in-trainer)
 - [Use it well](#use-it-well) · [All commands](#all-commands) · [Settings](#settings)
 - [Teams and remote masters](#teams-and-remote-masters) · [Troubleshooting](#troubleshooting) · [Security and privacy](#security-and-privacy)
@@ -142,7 +142,7 @@ only the ones that failed) or **Save Execution Results** (one file per task in
 
 ![Run actions](media/readme/14-execution-actions.png)
 
-## 4. Run your own project (new in 2.0)
+## 4. Run your own project (new in 1.0.1)
 
 For real work your code is more than one file: modules, configs, a
 `requirements.txt`. **Run Project on Workers…** sends the whole folder.

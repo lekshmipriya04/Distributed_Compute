@@ -27,7 +27,7 @@ can reach over SSH that have `python3`. There are four user-facing features:
    `custom` command) as a batch, one task per input, in parallel across
    workers. Each task runs in its own sandbox directory, which is deleted
    afterwards. Tasks can be cancelled.
-3. **Projects** (2.0). Send a whole folder (modules, configs,
+3. **Projects** (1.0.1). Send a whole folder (modules, configs,
    `requirements.txt`) and a command. Each worker builds the Python
    environment (in the sandbox, or cached when the owner lends disk), runs
    the command once per input, and the files each task writes to `outputs/`

@@ -31,7 +31,7 @@ class BaseServiceSettings(BaseSettings):
 
     # ── Service identity ──────────────────────
     service_name: str = Field(default="platform-service")
-    service_version: str = Field(default="2.0.0")
+    service_version: str = Field(default="1.0.1")
     environment: Environment = Field(default=Environment.DEVELOPMENT)
     debug: bool = Field(default=False)
     use_null_pool: bool = Field(default=False, description="Set True in tests to disable connection pooling")

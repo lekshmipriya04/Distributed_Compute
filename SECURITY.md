@@ -14,7 +14,7 @@ within a few days and keep you updated until it is fixed and released.
 
 | Version | Supported |
 |---|---|
-| 0.1.x | Yes |
+| 1.0.x | Yes |
 
 ## Running it safely
 

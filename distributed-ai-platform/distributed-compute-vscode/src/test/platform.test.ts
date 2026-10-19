@@ -96,10 +96,10 @@ describe('platform download', () => {
     expect(PLATFORM_RELEASE).toMatch(/^\d+\.\d+\.\d+$/);
     const manifest = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf8'));
     expect(PLATFORM_RELEASE).toBe(manifest.version); // released together
-    expect(platformTag('2.0.0')).toBe('v2.0.0');
-    expect(platformTag('v2.0.0')).toBe('v2.0.0');
-    expect(cloneArgs('2.0.0', '/tmp/p')).toEqual([
-      'clone', '--depth', '1', '--branch', 'v2.0.0',
+    expect(platformTag('1.0.1')).toBe('v1.0.1');
+    expect(platformTag('v1.0.1')).toBe('v1.0.1');
+    expect(cloneArgs('1.0.1', '/tmp/p')).toEqual([
+      'clone', '--depth', '1', '--branch', 'v1.0.1',
       'https://github.com/lekshmipriya04/Distributed_Compute.git', '/tmp/p',
     ]);
     expect(cloneArgs(undefined, '/tmp/p')).not.toContain('--branch');

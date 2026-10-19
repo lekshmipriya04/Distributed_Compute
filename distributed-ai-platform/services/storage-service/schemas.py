@@ -12,7 +12,7 @@ class DatasetResponse(BaseModel):
     description: Optional[str] = None
     storage_backend: str = "hdfs"
     # Location within that store. ``hdfs_path`` is the historical name of the
-    # same value, kept for clients written before 2.0.
+    # same value, kept for clients written before 1.0.1.
     storage_path: str = ""
     hdfs_path: str
     file_format: str

@@ -27,7 +27,7 @@ body:
     id: versions
     attributes:
       label: Versions and OS
-      placeholder: "2.0.0, macOS 15, Docker 28, VS Code 1.142, Firefox 140"
+      placeholder: "1.0.1, macOS 15, Docker 28, VS Code 1.142, Firefox 140"
     validations:
       required: true
   - type: textarea

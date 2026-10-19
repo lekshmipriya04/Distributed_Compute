@@ -3,10 +3,10 @@
 All notable changes to the Distributed AI Compute extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [2.0.0] - 2026-10-17
+## [1.0.1] - 2026-10-19
 
 The extension, the platform and the web dashboard now share one version
-number. **Set Up Platform** downloads platform release `v2.0.0`.
+number. **Set Up Platform** downloads platform release `v1.0.1`.
 
 ### Added
 - **Run Project on Workers…** (Explorer folder menu and Command Palette): send
@@ -29,7 +29,7 @@ number. **Set Up Platform** downloads platform release `v2.0.0`.
   HDFS is still available with `make up-hdfs`.
 
 ### Upgrading
-- Datasets uploaded before 2.0.0 stay in HDFS until you run
+- Datasets uploaded before 1.0.1 stay in HDFS until you run
   `make migrate-datasets` once in `distributed-ai-platform/`. Until then,
   training on one of them fails with a message saying so. Run `make backup`
   first if you want a copy.

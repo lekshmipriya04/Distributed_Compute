@@ -19,7 +19,7 @@ up-dev: config/.env
 up-hdfs: config/.env
 	STORAGE_BACKEND=hdfs docker compose --profile hdfs up -d --build
 
-# Moves datasets stored in HDFS (before 2.0) to local storage: starts HDFS,
+# Moves datasets stored in HDFS (before 1.0.1) to local storage: starts HDFS,
 # copies each file and switches its row, then stops HDFS again. Safe to re-run.
 migrate-datasets: config/.env
 	docker compose --profile hdfs up -d --wait namenode datanode-1 datanode-2 datanode-3

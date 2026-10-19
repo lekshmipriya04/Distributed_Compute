@@ -6,10 +6,10 @@ export const PLATFORM_REPO = 'https://github.com/lekshmipriya04/Distributed_Comp
 
 /**
  * The platform release this extension version was tested with; the extension
- * downloads that tag. Since 2.0.0 both share one version number, so this
+ * downloads that tag. Since 1.0.1 both share one version number, so this
  * moves with every release.
  */
-export const PLATFORM_RELEASE = '2.0.0';
+export const PLATFORM_RELEASE = '1.0.1';
 
 /** Git tag of a platform release. */
 export function platformTag(release: string): string {

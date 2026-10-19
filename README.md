@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/lekshmipriya04/Distributed_Compute/actions/workflows/ci.yml/badge.svg)](https://github.com/lekshmipriya04/Distributed_Compute/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Version 2.0.0](https://img.shields.io/badge/version-2.0.0-informational)
+![Version 1.0.1](https://img.shields.io/badge/version-1.0.1-informational)
 [![VS Code extension](https://img.shields.io/visual-studio-marketplace/v/aaron43210.distributed-ai-compute?label=VS%20Code%20extension)](https://marketplace.visualstudio.com/items?itemName=aaron43210.distributed-ai-compute)
 
 **Run your own code and models on the computers you already have, over
@@ -18,9 +18,9 @@ the password, and removes the key when you remove the worker.
 
 ![VS Code running a file as 8 parallel tasks on two workers, with live output](distributed-ai-platform/distributed-compute-vscode/media/readme/13-live-output.png)
 
-## What's new in 2.0
+## What's new in 1.0.1
 
-| | 1.x | 2.0 |
+| | 1.0.0 | 1.0.1 |
 |---|---|---|
 | What you can run | one file at a time | **a whole folder**: your modules, configs and data files |
 | Python packages | only what each worker already had | **`requirements.txt` installed on each worker** (pip, or uv when present), optionally cached |
@@ -31,10 +31,10 @@ the password, and removes the key when you remove the worker.
 | Start, until the first upload works | 33 s | 23 s |
 
 The built-in models (linear and logistic regression, a small CNN) are still
-there as demos. The point of 2.0 is that **your own model runs as it is**:
+there as demos. The point of 1.0.1 is that **your own model runs as it is**:
 PyTorch, scikit-learn, Hugging Face, or anything else that installs with pip.
 
-## Run your own project (new in 2.0)
+## Run your own project (new in 1.0.1)
 
 1. Put a `requirements.txt` next to your code, and have it write results to
    `outputs/` (or `$DC_OUTPUT_DIR`).
@@ -129,8 +129,8 @@ permissions.
 `make down` stops everything and keeps your data; `make reset` deletes it.
 `make backup` copies the database and datasets to `backups/<date>/`.
 
-**Upgrading from 1.x?** Run `make up`, then `make migrate-datasets` to move
-datasets out of HDFS. See [Upgrade from 1.x](distributed-ai-platform/docs/DEPLOYMENT.md#6-upgrade-from-1x-and-rollback).
+**Upgrading from 1.0.0?** Run `make up`, then `make migrate-datasets` to move
+datasets out of HDFS. See [Upgrade from 1.0.0](distributed-ai-platform/docs/DEPLOYMENT.md#6-upgrade-from-100-and-rollback).
 
 ## One computer, or a team
 
