@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/lekshmipriya04/Distributed_Compute/actions/workflows/ci.yml/badge.svg)](https://github.com/lekshmipriya04/Distributed_Compute/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Version 1.1.0](https://img.shields.io/badge/version-1.1.0-informational)
+![Version 1.1.1](https://img.shields.io/badge/version-1.1.1-informational)
 [![VS Code extension](https://img.shields.io/visual-studio-marketplace/v/aaron43210.distributed-ai-compute?label=VS%20Code%20extension)](https://marketplace.visualstudio.com/items?itemName=aaron43210.distributed-ai-compute)
 
 **Run your own code and models on the computers you already have, over

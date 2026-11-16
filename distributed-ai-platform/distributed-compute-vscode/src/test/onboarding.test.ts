@@ -8,6 +8,8 @@ import {
   parsePort,
   resultFileName,
   sliceChoices,
+  coresError,
+  memoryError,
   validateHost,
   type ExecutionTasks,
   type NodeCapabilities,
@@ -77,6 +79,17 @@ describe('onboarding helpers', () => {
     const fullChoice = choices.find((c) => c.label === 'Everything');
     expect(fullChoice?.cpu).toBe(8);
     expect(fullChoice?.memoryGb).toBe(16);
+  });
+
+  it('accepts any whole core count within the machine', () => {
+    for (const ok of ['1', '2', '3', '12', ' 7 ']) expect(coresError(ok, 12)).toBeUndefined();
+    for (const bad of ['', '0', '13', '2.5', '-1', 'two']) expect(coresError(bad, 12)).toMatch(/1 to 12/);
+    expect(coresError('64')).toBeUndefined();
+  });
+
+  it('accepts memory separately, including fractions of a GB', () => {
+    for (const ok of ['0.5', '4', '12', '24']) expect(memoryError(ok, 24)).toBeUndefined();
+    for (const bad of ['', '0', '-2', '24.5', 'lots']) expect(memoryError(bad, 24)).toMatch(/up to 24/);
   });
 
   it('parses input lines and lists', () => {

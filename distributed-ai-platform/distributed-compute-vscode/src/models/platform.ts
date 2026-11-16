@@ -9,7 +9,7 @@ export const PLATFORM_REPO = 'https://github.com/lekshmipriya04/Distributed_Comp
  * downloads that tag. Both share one version number, so this moves with every
  * release.
  */
-export const PLATFORM_RELEASE = '1.1.0';
+export const PLATFORM_RELEASE = '1.1.1';
 
 /** Git tag of a platform release. */
 export function platformTag(release: string): string {

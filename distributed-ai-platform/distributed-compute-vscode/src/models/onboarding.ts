@@ -169,6 +169,20 @@ export function sliceChoices(c: Pick<NodeCapabilities, 'detected_cpu' | 'detecte
   return choices;
 }
 
+/** Why a typed core count is not valid, or undefined when it is. */
+export function coresError(value: string, max?: number): string | undefined {
+  const n = Number(value.trim());
+  const ok = value.trim() !== '' && Number.isInteger(n) && n >= 1 && (max === undefined || n <= max);
+  return ok ? undefined : `Enter a whole number${max ? ` from 1 to ${max}` : ' of 1 or more'}`;
+}
+
+/** Why a typed memory size (GB) is not valid, or undefined when it is. */
+export function memoryError(value: string, max?: number): string | undefined {
+  const n = Number(value.trim());
+  const ok = value.trim() !== '' && Number.isFinite(n) && n > 0 && (max === undefined || n <= max);
+  return ok ? undefined : `Enter a number of GB above 0${max ? ` and up to ${round1(max)}` : ''}, e.g. 4 or 2.5`;
+}
+
 /** One input per line; blank lines are skipped. */
 export function parseInputLines(text: string): string[] {
   return text

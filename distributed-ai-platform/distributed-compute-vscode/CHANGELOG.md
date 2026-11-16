@@ -3,6 +3,15 @@
 All notable changes to the Distributed AI Compute extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.1] - 2026-11-16
+
+### Added
+- **Add Compute Node** offers **Custom…** next to the ready-made slices:
+  type any number of cores (1, 2, 3 … up to what the machine has) and,
+  separately, how much memory in GB (fractions such as 2.5 are fine).
+- **Configure Resource Slice** now asks for memory as well as cores, so a
+  node's memory can be changed after it was added.
+
 ## [1.1.0] - 2026-11-16
 
 Setup reliability on other computers. **Set Up Platform** downloads platform

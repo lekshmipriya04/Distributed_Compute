@@ -13,6 +13,7 @@ import type { Runtime } from '../models/execution';
 import { gpuPresetGb, hasGpu, type ComputeNode, type NodeSliceRequest } from '../models/node';
 import { buildDefault, validateConfig } from '../configuration/projectConfig';
 import { disableSparkRay, enableSparkRay } from './engines';
+import { askSliceAmounts } from './nodes';
 import { setUpPlatform, stopPlatform } from './platform';
 import { normalizeLineEndings } from '../models/platform';
 import { addNode, refreshNodeCapabilities, removeNode, rotateNodeKey, setDraining, testNode } from './nodes';
@@ -357,22 +358,18 @@ async function pickSlice(node: ComputeNode): Promise<NodeSliceRequest | undefine
     req.gpuMemoryAllocatableGb = gb;
     req.gpuAllocatableCount = gb > 0 ? node.gpuCount : 0;
   }
-  const maxCores = node.cpuTotal;
-  const rawCores = await vscode.window.showInputBox({
-    title: `Cores to lend${maxCores ? ` (1 – ${maxCores})` : ''}`,
-    value: String(node.cpuAllocatable ?? 1),
-    ignoreFocusOut: true,
-    validateInput: (v) => {
-      const n = Number(v);
-      return Number.isInteger(n) && n >= 1 && (maxCores === undefined || n <= maxCores)
-        ? undefined
-        : `Enter a whole number${maxCores ? ` between 1 and ${maxCores}` : ' >= 1'}`;
-    },
+  const amounts = await askSliceAmounts({
+    host: node.name || node.host || node.id,
+    maxCores: node.cpuTotal,
+    maxMemoryGb: node.memoryTotalGb,
+    cores: node.cpuAllocatable ?? 1,
+    memoryGb: node.memoryAllocatableGb ?? Math.min(node.memoryTotalGb ?? 1, 1),
   });
-  if (rawCores === undefined) {
+  if (!amounts) {
     return undefined;
   }
-  req.cpuAllocatable = Number(rawCores);
+  req.cpuAllocatable = amounts.cpu;
+  req.memoryAllocatableGb = amounts.memoryGb;
   return req;
 }
 

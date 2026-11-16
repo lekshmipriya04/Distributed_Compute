@@ -16,6 +16,8 @@ import {
   validateHost,
   type NodeConnectResult,
   type NodeProvisionResult,
+  coresError,
+  memoryError,
 } from '../models/onboarding';
 import type { CommandDeps } from './register';
 
@@ -243,15 +245,63 @@ async function provisionManually(
   }
 }
 
+/**
+ * Ask for the cores and memory to lend, each on its own. Undefined when the
+ * user cancels.
+ */
+export async function askSliceAmounts(o: {
+  host: string;
+  maxCores?: number;
+  maxMemoryGb?: number;
+  cores: number;
+  memoryGb: number;
+}): Promise<{ cpu: number; memoryGb: number } | undefined> {
+  const cores = await vscode.window.showInputBox({
+    title: `Cores ${o.host} may use${o.maxCores ? ` (1 – ${o.maxCores})` : ''}`,
+    value: String(o.cores),
+    ignoreFocusOut: true,
+    validateInput: (v) => coresError(v, o.maxCores),
+  });
+  if (cores === undefined) {
+    return undefined;
+  }
+  const memory = await vscode.window.showInputBox({
+    title: `Memory (GB) ${o.host} may use${o.maxMemoryGb ? ` (up to ${o.maxMemoryGb})` : ''}`,
+    value: String(o.memoryGb),
+    ignoreFocusOut: true,
+    validateInput: (v) => memoryError(v, o.maxMemoryGb),
+  });
+  if (memory === undefined) {
+    return undefined;
+  }
+  return { cpu: Number(cores.trim()), memoryGb: Number(memory.trim()) };
+}
+
 async function registerProvisioned(deps: CommandDeps, gw: GatewayApi, p: NodeProvisionResult): Promise<void> {
-  const slice = await vscode.window.showQuickPick(
-    sliceChoices(p).map((c, i) => ({ ...c, picked: i === 0 })),
+  const presets = sliceChoices(p);
+  const picked = await vscode.window.showQuickPick(
+    [
+      ...presets.map((c, i) => ({ ...c, picked: i === 0, custom: false })),
+      { label: '$(edit) Custom…', description: 'choose the cores and memory yourself', cpu: 0, memoryGb: 0, custom: true },
+    ],
     {
       title: `How much of ${p.host} may the platform use?`,
       placeHolder: `Detected: ${detectionSummary(p)}`,
       ignoreFocusOut: true,
     },
   );
+  if (!picked) {
+    return;
+  }
+  const slice = picked.custom
+    ? await askSliceAmounts({
+        host: p.host,
+        maxCores: Math.max(1, p.detected_cpu),
+        maxMemoryGb: p.detected_memory_gb > 0 ? p.detected_memory_gb : undefined,
+        cores: presets[0].cpu,
+        memoryGb: presets[0].memoryGb,
+      })
+    : picked;
   if (!slice) {
     return;
   }
