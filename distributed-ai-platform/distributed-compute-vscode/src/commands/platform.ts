@@ -17,6 +17,8 @@ import {
   platformTag,
   composeFailureHint,
   composeInvocation,
+  isStartupRace,
+  servicesWithoutNetwork,
   dockerLaunchCommand,
   dockerStartHint,
   dockerStateFrom,
@@ -24,6 +26,7 @@ import {
   withDockerPath,
   type DockerState,
 } from '../models/platform';
+import { acquireLock } from '../utilities/lock';
 import type { Logger } from '../utilities/logger';
 import type { CommandDeps } from './register';
 
@@ -101,16 +104,43 @@ export async function runDocker(
   cwd: string,
   args: string[],
   token?: vscode.CancellationToken,
+  quiet = false,
 ): Promise<RunResult> {
   if (args[0] !== 'compose') {
-    return runProcess(deps.logger, 'docker', args, cwd, token);
+    return runProcess(deps.logger, 'docker', args, cwd, token, quiet);
   }
   if (composeV2 === undefined) {
     const probe = await runProcess(deps.logger, 'docker', ['compose', 'version'], undefined, undefined, true);
     composeV2 = probe.exitCode === 0;
   }
   const run = composeInvocation(composeV2, args.slice(1));
-  return runProcess(deps.logger, run.cmd, run.args, cwd, token);
+  return runProcess(deps.logger, run.cmd, run.args, cwd, token, quiet);
+}
+
+/** `compose up`, retried once when it lost the race with Docker Desktop's own restart. */
+async function composeUp(deps: CommandDeps, folder: string, token: vscode.CancellationToken): Promise<RunResult> {
+  const up = await runDocker(deps, folder, ['compose', 'up', '-d', '--build'], token);
+  if (up.exitCode === 0 || token.isCancellationRequested || !isStartupRace(up.output)) {
+    return up;
+  }
+  deps.logger.warn('a service was not ready yet (Docker was still starting); trying once more');
+  await sleep(10000);
+  return runDocker(deps, folder, ['compose', 'up', '-d', '--build'], token);
+}
+
+/** Recreate any container that came back with no network (it would run but reach nothing). */
+async function reattachDetached(deps: CommandDeps, folder: string, token: vscode.CancellationToken): Promise<void> {
+  const ids = (await runDocker(deps, folder, ['compose', 'ps', '-a', '-q'], token, true)).output.split(/\s+/).filter(Boolean);
+  if (ids.length === 0) {
+    return;
+  }
+  const format = '{{index .Config.Labels "com.docker.compose.service"}} {{len .NetworkSettings.Networks}}';
+  const inspect = await runDocker(deps, folder, ['inspect', '--format', format, ...ids], token, true);
+  const broken = servicesWithoutNetwork(inspect.output);
+  if (broken.length > 0) {
+    deps.logger.warn(`reconnecting services that lost their network: ${broken.join(', ')}`);
+    await runDocker(deps, folder, ['compose', 'up', '-d', '--force-recreate', '--no-deps', ...broken], token);
+  }
 }
 
 /**
@@ -430,6 +460,29 @@ async function waitForGateway(masterUrl: string, token: vscode.CancellationToken
  * explains that the first build takes a while.
  */
 export async function setUpPlatform(deps: CommandDeps): Promise<boolean> {
+  const release = await acquireLock(path.join(deps.context.globalStorageUri.fsPath, 'setup.lock'), 15 * 60 * 1000);
+  if (release) {
+    try {
+      return await setUpPlatformHere(deps);
+    } finally {
+      await release();
+    }
+  }
+  // Another VS Code window is starting the platform: wait for it, then connect.
+  deps.logger.info('another VS Code window is starting the platform; waiting for it');
+  const masterUrl = readSettings().masterUrl;
+  const ready = await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: 'Distributed Compute: waiting for the platform…', cancellable: true },
+    (_progress, token) => waitForGateway(masterUrl, token),
+  );
+  if (ready) {
+    await deps.connection.connect();
+    deps.refreshAll();
+  }
+  return ready;
+}
+
+async function setUpPlatformHere(deps: CommandDeps): Promise<boolean> {
   if (!validateMasterUrl(readSettings().masterUrl).isLocal) {
     await updateMasterUrl(DEFAULT_MASTER_URL, vscode.ConfigurationTarget.Global);
   }
@@ -458,8 +511,10 @@ export async function setUpPlatform(deps: CommandDeps): Promise<boolean> {
           ? 'Building and starting the platform (the first time takes several minutes)…'
           : 'Starting the platform…',
       });
-      const up = await runDocker(deps, folder, ['compose', 'up', '-d', '--build'], token);
-      if (up.exitCode !== 0) {
+      const up = await composeUp(deps, folder, token);
+      if (up.exitCode === 0) {
+        await reattachDetached(deps, folder, token);
+      } else {
         if (!token.isCancellationRequested) {
           await reportComposeFailure(deps, folder, up.output, 'The platform did not start');
         }

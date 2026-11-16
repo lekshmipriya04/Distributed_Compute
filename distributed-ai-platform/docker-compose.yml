@@ -30,7 +30,7 @@ services:
       - ./infrastructure/docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
     # BUG-11 fix: healthcheck so dependent services wait for Postgres to be ready
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-platform}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-platform} -d ${POSTGRES_DB:-platform_db}"]
       interval: 5s
       timeout: 5s
       retries: 10

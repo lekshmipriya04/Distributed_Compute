@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import {
   archiveUrl,
   composeFailureHint,
+  isStartupRace,
+  servicesWithoutNetwork,
   composeInvocation,
   dockerLaunchCommand,
   dockerStartHint,
@@ -140,5 +142,18 @@ describe('compose failure hints', () => {
     expect(composeFailureHint('failed to resolve source metadata for docker.io/library/python:3.11-slim: i/o timeout')).toMatch(/internet/);
     expect(composeFailureHint('dependency failed to start: container x-postgres-1 is unhealthy')).toMatch(/stopped while starting/);
     expect(composeFailureHint('something new')).toBeUndefined();
+  });
+});
+
+describe('docker start race', () => {
+  it('retries only when a dependency was not ready yet', () => {
+    expect(isStartupRace('dependency failed to start: container x-ssh-executor-1 is unhealthy')).toBe(true);
+    expect(isStartupRace('Bind for 127.0.0.1:8090 failed: port is already allocated')).toBe(false);
+  });
+
+  it('finds containers that lost their network', () => {
+    const out = 'postgres 1\nextension-gateway 0\napi-gateway 0\r\nfrontend 0\nssh-executor 1\n\n';
+    expect(servicesWithoutNetwork(out)).toEqual(['extension-gateway', 'api-gateway', 'frontend']);
+    expect(servicesWithoutNetwork('postgres 1\n')).toEqual([]);
   });
 });

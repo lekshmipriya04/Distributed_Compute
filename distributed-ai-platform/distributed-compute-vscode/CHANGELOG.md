@@ -3,6 +3,19 @@
 All notable changes to the Distributed AI Compute extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.2] - 2026-11-16
+
+### Fixed
+- Opening VS Code while Docker Desktop was stopped could leave the platform
+  broken: "The platform did not start" (`Name or service not known`), or the
+  gateway and dashboard running with no network so nothing loaded. Setup now
+  tries once more when a service was not ready because Docker was still
+  starting, and reconnects any container that came back without a network.
+- Two VS Code windows opening at the same time no longer start the platform
+  twice; the second window waits for the first and then connects.
+- The database health check no longer logs `database "platform" does not
+  exist` every few seconds.
+
 ## [1.1.1] - 2026-11-16
 
 ### Added

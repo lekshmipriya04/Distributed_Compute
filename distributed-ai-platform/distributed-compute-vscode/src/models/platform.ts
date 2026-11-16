@@ -9,7 +9,7 @@ export const PLATFORM_REPO = 'https://github.com/lekshmipriya04/Distributed_Comp
  * downloads that tag. Both share one version number, so this moves with every
  * release.
  */
-export const PLATFORM_RELEASE = '1.1.1';
+export const PLATFORM_RELEASE = '1.1.2';
 
 /** Git tag of a platform release. */
 export function platformTag(release: string): string {
@@ -194,6 +194,31 @@ export function composeFailureHint(output: string): string | undefined {
     return 'A platform service stopped while starting. Its log is in the Distributed Compute output.';
   }
   return undefined;
+}
+
+/**
+ * True when `compose up` failed only because a service was not ready yet. This
+ * happens right after Docker Desktop starts: it restarts the old containers
+ * itself while compose recreates them. Trying once more fixes it.
+ */
+export function isStartupRace(output: string): boolean {
+  return /dependency failed to start|is unhealthy/i.test(output);
+}
+
+/**
+ * Services whose container is attached to no network, from `docker inspect`
+ * lines "<service> <number of networks>". Such a container runs but cannot
+ * reach the others (left behind by the same race).
+ */
+export function servicesWithoutNetwork(inspectOutput: string): string[] {
+  const broken = new Set<string>();
+  for (const line of inspectOutput.split(/\r?\n/)) {
+    const m = /^(\S+)\s+0\s*$/.exec(line.trim());
+    if (m) {
+      broken.add(m[1]);
+    }
+  }
+  return [...broken];
 }
 
 export const DOCKER_DOWNLOAD_URL = 'https://www.docker.com/products/docker-desktop/';
