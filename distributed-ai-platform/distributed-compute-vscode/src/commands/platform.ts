@@ -13,13 +13,15 @@ import {
   DOCKER_DOWNLOAD_URL,
   PLATFORM_RELEASE,
   PLATFORM_SUBDIR,
-  cloneArgs,
+  archiveUrl,
   platformTag,
+  composeFailureHint,
   composeInvocation,
   dockerLaunchCommand,
   dockerStartHint,
   dockerStateFrom,
   startupAction,
+  withDockerPath,
   type DockerState,
 } from '../models/platform';
 import type { Logger } from '../utilities/logger';
@@ -31,7 +33,7 @@ const DISMISSED_KEY = 'distributedCompute.setupDismissed';
 export interface RunResult {
   exitCode: number;
   spawnFailed: boolean;
-  /** The command's combined output, kept only for quiet runs (short probes). */
+  /** The tail of the command's combined output (stdout and stderr). */
   output: string;
 }
 
@@ -50,7 +52,7 @@ export function runProcess(
     }
     let child;
     try {
-      child = spawn(cmd, args, { cwd, env: process.env });
+      child = spawn(cmd, args, { cwd, env: withDockerPath(process.platform, process.env) });
     } catch (err) {
       logger.error(`could not start ${cmd}`, { message: (err as Error).message });
       resolve({ exitCode: -1, spawnFailed: true, output: '' });
@@ -58,8 +60,8 @@ export function runProcess(
     }
     let output = '';
     const forward = (chunk: Buffer) => {
+      output = (output + chunk.toString('utf8')).slice(-16384);
       if (quiet) {
-        output = (output + chunk.toString('utf8')).slice(-8192);
         return;
       }
       for (const line of chunk.toString('utf8').split(/\r?\n/)) {
@@ -94,16 +96,35 @@ let composeV2: boolean | undefined;
  * Run docker. "compose ..." uses Compose v2 when present, else the older
  * standalone docker-compose (still the default on some Linux distributions).
  */
-export async function runDocker(deps: CommandDeps, cwd: string, args: string[], token: vscode.CancellationToken): Promise<number> {
+export async function runDocker(
+  deps: CommandDeps,
+  cwd: string,
+  args: string[],
+  token?: vscode.CancellationToken,
+): Promise<RunResult> {
   if (args[0] !== 'compose') {
-    return (await runProcess(deps.logger, 'docker', args, cwd, token)).exitCode;
+    return runProcess(deps.logger, 'docker', args, cwd, token);
   }
   if (composeV2 === undefined) {
     const probe = await runProcess(deps.logger, 'docker', ['compose', 'version'], undefined, undefined, true);
     composeV2 = probe.exitCode === 0;
   }
   const run = composeInvocation(composeV2, args.slice(1));
-  return (await runProcess(deps.logger, run.cmd, run.args, cwd, token)).exitCode;
+  return runProcess(deps.logger, run.cmd, run.args, cwd, token);
+}
+
+/**
+ * After a failed `compose up`: write each container's state and recent log to
+ * the output, and show the likely cause with its fix.
+ */
+export async function reportComposeFailure(deps: CommandDeps, folder: string, output: string, what: string): Promise<void> {
+  deps.logger.error(`${what}. Container states and recent logs follow.`);
+  await runDocker(deps, folder, ['compose', 'ps', '-a']);
+  await runDocker(deps, folder, ['compose', 'logs', '--no-color', '--tail', '40']);
+  const hint = composeFailureHint(output);
+  void vscode.window.showErrorMessage(
+    hint ? `${what}. ${hint}` : `${what}. See the Distributed Compute output for the Docker messages.`,
+  );
 }
 
 /** Start a program and leave it running (Docker Desktop on Windows). */
@@ -244,60 +265,133 @@ async function pickPlatformFolder(): Promise<string | undefined> {
   return undefined;
 }
 
-/** Find the platform, or download it (git clone) into the extension's storage. */
+function releaseMarker(deps: CommandDeps): vscode.Uri {
+  return vscode.Uri.file(path.join(downloadDir(deps), 'release.txt'));
+}
+
+async function readText(uri: vscode.Uri): Promise<string | undefined> {
+  try {
+    return Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8');
+  } catch {
+    return undefined;
+  }
+}
+
+/** A copy this extension downloaded for an older release (replaced on upgrade). */
+async function isOutdatedDownload(deps: CommandDeps, folder: string): Promise<boolean> {
+  if (path.resolve(folder) !== path.resolve(downloadDir(deps), PLATFORM_SUBDIR)) {
+    return false;
+  }
+  return (await readText(releaseMarker(deps)))?.trim() !== PLATFORM_RELEASE;
+}
+
+/** Find the platform, or download it into the extension's storage. */
 async function obtainPlatformFolder(
   deps: CommandDeps,
   progress: vscode.Progress<{ message?: string }>,
   token: vscode.CancellationToken,
 ): Promise<string | undefined> {
   const known = await knownPlatformFolder(deps);
-  if (known) {
+  if (known && !(await isOutdatedDownload(deps, known))) {
     return known;
   }
-  const choice = await vscode.window.showQuickPick(
-    [
-      { label: '$(cloud-download) Download it for me', description: 'Recommended', id: 'download' },
-      { label: '$(folder-opened) I already have it', description: 'Pick the folder', id: 'pick' },
-    ],
-    { title: 'Where is the platform?', placeHolder: 'The platform code is needed once to build its containers', ignoreFocusOut: true },
-  );
-  if (!choice) {
-    return undefined;
-  }
-  if (choice.id === 'pick') {
-    return pickPlatformFolder();
+  if (known) {
+    // Same folder, so the same Compose project: the new release takes over the
+    // existing containers' data volumes.
+    deps.logger.info(`updating the downloaded platform to ${PLATFORM_RELEASE}`);
+  } else {
+    const choice = await vscode.window.showQuickPick(
+      [
+        { label: '$(cloud-download) Download it for me', description: 'Recommended', id: 'download' },
+        { label: '$(folder-opened) I already have it', description: 'Pick the folder', id: 'pick' },
+      ],
+      { title: 'Where is the platform?', placeHolder: 'The platform code is needed once to build its containers', ignoreFocusOut: true },
+    );
+    if (!choice) {
+      return undefined;
+    }
+    if (choice.id === 'pick') {
+      return pickPlatformFolder();
+    }
   }
   progress.report({ message: 'Downloading the platform…' });
+  const folder = path.join(downloadDir(deps), PLATFORM_SUBDIR);
+  // Keep the settings (secrets, Spark + Ray choice) of an earlier download.
+  const kept = new Map<string, string>();
+  for (const name of [path.join('config', '.env'), '.env']) {
+    const text = await readText(vscode.Uri.file(path.join(folder, name)));
+    if (text !== undefined) {
+      kept.set(name, text);
+    }
+  }
+  if (!(await downloadPlatform(deps, token)) || !(await isPlatformFolder(folder))) {
+    if (!token.isCancellationRequested) {
+      void vscode.window.showErrorMessage(
+        'Could not download the platform. Check the internet connection, or download the repository yourself and choose "I already have it". Details are in the Distributed Compute output.',
+      );
+    }
+    return undefined;
+  }
+  for (const [name, text] of kept) {
+    await vscode.workspace.fs.writeFile(vscode.Uri.file(path.join(folder, name)), Buffer.from(text, 'utf8'));
+  }
+  await vscode.workspace.fs.writeFile(releaseMarker(deps), Buffer.from(PLATFORM_RELEASE, 'utf8'));
+  await updatePlatformPath(folder);
+  return folder;
+}
+
+/**
+ * Download the release's source archive (the default branch when that tag does
+ * not exist yet) and unpack it into the download folder with tar, which ships
+ * with macOS, Linux and Windows 10+.
+ */
+async function downloadPlatform(deps: CommandDeps, token: vscode.CancellationToken): Promise<boolean> {
   const target = downloadDir(deps);
-  await vscode.workspace.fs.delete(vscode.Uri.file(target), { recursive: true, useTrash: false }).then(
-    () => undefined,
-    () => undefined,
-  );
-  await vscode.workspace.fs.createDirectory(deps.context.globalStorageUri);
-  // The platform release this extension was tested with; the default branch
-  // only when that tag does not exist (before the release is tagged).
-  let result = await runProcess(deps.logger, 'git', cloneArgs(PLATFORM_RELEASE, target), undefined, token);
-  if (!result.spawnFailed && result.exitCode !== 0 && !token.isCancellationRequested) {
-    deps.logger.warn(`no platform tag ${platformTag(PLATFORM_RELEASE)}; downloading the default branch instead`);
+  for (const release of [PLATFORM_RELEASE, undefined]) {
+    const url = archiveUrl(release);
+    deps.logger.info(`downloading ${url}`);
+    const abort = new AbortController();
+    const cancel = token.onCancellationRequested(() => abort.abort());
+    const timer = setTimeout(() => abort.abort(), 10 * 60 * 1000);
+    let bytes: Uint8Array;
+    try {
+      const res = await fetch(url, { signal: abort.signal });
+      if (res.status === 404 && release) {
+        deps.logger.warn(`no platform tag ${platformTag(release)}; downloading the default branch instead`);
+        continue;
+      }
+      if (!res.ok) {
+        deps.logger.error(`download failed: HTTP ${res.status}`);
+        return false;
+      }
+      bytes = new Uint8Array(await res.arrayBuffer());
+    } catch (err) {
+      deps.logger.error('download failed', { message: (err as Error).message });
+      return false;
+    } finally {
+      clearTimeout(timer);
+      cancel.dispose();
+    }
     await vscode.workspace.fs.delete(vscode.Uri.file(target), { recursive: true, useTrash: false }).then(
       () => undefined,
       () => undefined,
     );
-    result = await runProcess(deps.logger, 'git', cloneArgs(undefined, target), undefined, token);
-  }
-  if (result.spawnFailed) {
-    void vscode.window.showErrorMessage(
-      'Git is needed to download the platform. Install Git, or download the repository yourself and choose "I already have it".',
+    await vscode.workspace.fs.createDirectory(vscode.Uri.file(target));
+    // Relative archive name with cwd = target: GNU tar (e.g. from Git for
+    // Windows) would read "C:\..." as a remote host.
+    const archive = 'platform.tar.gz';
+    await vscode.workspace.fs.writeFile(vscode.Uri.file(path.join(target, archive)), bytes);
+    const result = await runProcess(deps.logger, 'tar', ['-xzf', archive, '--strip-components=1'], target, token);
+    await vscode.workspace.fs.delete(vscode.Uri.file(path.join(target, archive))).then(
+      () => undefined,
+      () => undefined,
     );
-    return undefined;
+    if (result.spawnFailed) {
+      deps.logger.error('tar is needed to unpack the platform and was not found on this machine');
+    }
+    return result.exitCode === 0;
   }
-  const folder = path.join(target, PLATFORM_SUBDIR);
-  if (result.exitCode !== 0 || !(await isPlatformFolder(folder))) {
-    void vscode.window.showErrorMessage('Could not download the platform. See the Distributed Compute output for details.');
-    return undefined;
-  }
-  await updatePlatformPath(folder);
-  return folder;
+  return false;
 }
 
 /** config/.env holds the platform's settings; create it from the example once. */
@@ -364,12 +458,10 @@ export async function setUpPlatform(deps: CommandDeps): Promise<boolean> {
           ? 'Building and starting the platform (the first time takes several minutes)…'
           : 'Starting the platform…',
       });
-      const code = await runDocker(deps, folder, ['compose', 'up', '-d'], token);
-      if (code !== 0) {
+      const up = await runDocker(deps, folder, ['compose', 'up', '-d', '--build'], token);
+      if (up.exitCode !== 0) {
         if (!token.isCancellationRequested) {
-          void vscode.window.showErrorMessage(
-            'The platform did not start. See the Distributed Compute output for the Docker messages.',
-          );
+          await reportComposeFailure(deps, folder, up.output, 'The platform did not start');
         }
         return false;
       }
@@ -414,8 +506,8 @@ export async function stopPlatform(deps: CommandDeps): Promise<void> {
   await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: 'Stopping the platform (your data is kept)…', cancellable: true },
     async (_progress, token) => {
-      const code = await runDocker(deps, folder, ['compose', 'stop'], token);
-      if (code === 0) {
+      const { exitCode } = await runDocker(deps, folder, ['compose', 'stop'], token);
+      if (exitCode === 0) {
         void vscode.window.showInformationMessage('The platform is stopped. "Set Up Platform" starts it again.');
       } else {
         void vscode.window.showErrorMessage('Could not stop the platform. See the Distributed Compute output.');

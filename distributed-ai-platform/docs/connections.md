@@ -19,7 +19,7 @@ which protocol and which credentials. For the architecture, see
 | SSH dev providers | `ssh-provider`, `ssh-provider-2` | not published | SSH :2222 | `--profile dev` only; login `provider/providerpass` |
 | Workers | your machines | 22 (or as registered) | SSH | `sshd` + `python3`, nothing else |
 
-Every container is on the `platform-net` bridge (172.20.0.0/16) and
+Every container is on the `platform-net` bridge (Docker picks a free subnet) and
 addresses the others by container name.
 
 ## 2. Edges

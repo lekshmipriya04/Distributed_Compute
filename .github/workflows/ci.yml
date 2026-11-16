@@ -5,6 +5,8 @@ name: CI
 on:
   push:
     branches: [ "main" ]
+    # A release tag (v1.1.0) also publishes the extension (job "publish").
+    tags: [ "v*.*.*" ]
   pull_request:
     branches: [ "main" ]
 
@@ -170,7 +172,7 @@ jobs:
         docker compose --profile dev up -d --build --wait --wait-timeout 600
         # The test workers install python3 on first start.
         for w in ssh-provider ssh-provider-2; do
-          for i in $(seq 1 60); do docker exec $w python3 --version && break; sleep 5; done
+          for i in $(seq 1 60); do docker compose exec -T $w python3 --version && break; sleep 5; done
         done
 
     - name: Start two more gateways (ports 8091, 8092)
@@ -239,3 +241,41 @@ jobs:
         go test ./...
         for os in linux darwin windows; do GOOS=$os GOARCH=amd64 go build -o /dev/null . ; done
         GOOS=darwin GOARCH=arm64 go build -o /dev/null .
+
+  # Release tag only: publish the tested .vsix to the VS Code Marketplace and
+  # Open VSX. Secrets VSCE_PAT and OVSX_PAT are set in the repository settings.
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs: [extension]
+    defaults:
+      run:
+        working-directory: distributed-ai-platform/distributed-compute-vscode
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+        cache: "npm"
+        cache-dependency-path: distributed-ai-platform/distributed-compute-vscode/package-lock.json
+
+    - uses: actions/download-artifact@v4
+      with:
+        name: distributed-ai-compute-vsix
+        path: distributed-ai-platform/distributed-compute-vscode
+
+    - name: Tag matches package.json version
+      run: |
+        version=$(node -p "require('./package.json').version")
+        test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != package.json $version"; exit 1; }
+
+    - name: Publish to the VS Code Marketplace
+      run: npx --yes @vscode/vsce@2 publish --packagePath distributed-ai-compute.vsix -p "$VSCE_PAT"
+      env:
+        VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+    - name: Publish to Open VSX
+      run: npx --yes ovsx@0.10.1 publish distributed-ai-compute.vsix -p "$OVSX_PAT"
+      env:
+        OVSX_PAT: ${{ secrets.OVSX_PAT }}

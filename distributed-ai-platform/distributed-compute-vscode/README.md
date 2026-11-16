@@ -27,7 +27,6 @@ forgets the password.
 - **[Docker Desktop](https://www.docker.com/products/docker-desktop/)** (on
   Linux, Docker Engine works too). The platform runs in Docker on your
   computer; it needs about 2 GB of memory.
-- **Git**, only if the extension has to download the platform for you.
 - At least one **worker**: any machine you can reach over SSH with `python3`
   (Linux or macOS; Windows with OpenSSH). It can be this computer.
 

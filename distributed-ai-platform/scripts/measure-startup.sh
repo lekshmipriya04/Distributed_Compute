@@ -7,7 +7,7 @@
 #   scripts/measure-startup.sh [--keep] [extra docker compose args...]
 #   e.g. scripts/measure-startup.sh --profile hdfs     (with STORAGE_BACKEND=hdfs)
 #
-# Stop your own stack first (make down): container names and ports are shared.
+# Stop your own stack first (make down): host ports are shared.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

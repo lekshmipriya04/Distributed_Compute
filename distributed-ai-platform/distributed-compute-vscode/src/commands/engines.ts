@@ -115,8 +115,8 @@ async function setSparkRay(deps: CommandDeps, gw: GatewayApi, enabled: boolean):
     },
     async (progress, token) => {
       progress.report({ message: 'Rebuilding the master container (see the Distributed Compute output)…' });
-      const code = await runDocker(deps, folder, ['compose', 'up', '-d', '--build', 'ssh-executor'], token);
-      if (code !== 0) {
+      const { exitCode } = await runDocker(deps, folder, ['compose', 'up', '-d', '--build', 'ssh-executor'], token);
+      if (exitCode !== 0) {
         return false;
       }
       progress.report({ message: 'Waiting for the master to come back…' });

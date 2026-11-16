@@ -3,6 +3,31 @@
 All notable changes to the Distributed AI Compute extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.0] - 2026-11-16
+
+Setup reliability on other computers. **Set Up Platform** downloads platform
+release `v1.1.0`.
+
+### Fixed
+- **Set Up Platform** failed with "The platform did not start" on computers
+  where another Docker project already used the subnet `172.20.0.0/16`
+  ("Pool overlaps with other one on this address space") or a container named
+  `postgres` or `frontend`. The platform no longer fixes its subnet or its
+  container names, so Docker picks free ones.
+- Docker was reported as missing, or image pulls failed with
+  `docker-credential-desktop: executable file not found`, when VS Code was
+  started from the Dock, Start menu or a desktop launcher. Docker Desktop's
+  folders are now added to the search path.
+- Updating the extension now also updates a platform it downloaded earlier and
+  rebuilds its containers; your data and settings (`config/.env`) are kept.
+
+### Changed
+- The platform is downloaded as a source archive, so Git is no longer needed
+  (it was often missing on Windows). Files keep Unix line endings on Windows.
+- When the platform does not start, the error names the cause and the fix
+  (busy port, no free network range, disk full, no internet, old container in
+  the way), and the output shows each container's state and recent log.
+
 ## [1.0.1] - 2026-10-19
 
 The extension, the platform and the web dashboard now share one version

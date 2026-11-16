@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  cloneArgs,
+  archiveUrl,
+  composeFailureHint,
   composeInvocation,
   dockerLaunchCommand,
   dockerStartHint,
@@ -11,6 +12,7 @@ import {
   PLATFORM_RELEASE,
   platformTag,
   startupAction,
+  withDockerPath,
   type StartupFacts,
 } from '../models/platform';
 
@@ -92,16 +94,51 @@ describe('line endings', () => {
 });
 
 describe('platform download', () => {
-  it('clones the tag of the platform release the extension targets', () => {
+  it('downloads the source archive of the platform release the extension targets', () => {
     expect(PLATFORM_RELEASE).toMatch(/^\d+\.\d+\.\d+$/);
     const manifest = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf8'));
     expect(PLATFORM_RELEASE).toBe(manifest.version); // released together
     expect(platformTag('1.0.1')).toBe('v1.0.1');
     expect(platformTag('v1.0.1')).toBe('v1.0.1');
-    expect(cloneArgs('1.0.1', '/tmp/p')).toEqual([
-      'clone', '--depth', '1', '--branch', 'v1.0.1',
-      'https://github.com/lekshmipriya04/Distributed_Compute.git', '/tmp/p',
-    ]);
-    expect(cloneArgs(undefined, '/tmp/p')).not.toContain('--branch');
+    expect(archiveUrl('1.1.0')).toBe(
+      'https://codeload.github.com/lekshmipriya04/Distributed_Compute/tar.gz/refs/tags/v1.1.0',
+    );
+    expect(archiveUrl(undefined)).toBe('https://codeload.github.com/lekshmipriya04/Distributed_Compute/tar.gz/refs/heads/main');
+  });
+});
+
+describe('docker PATH', () => {
+  it("appends Docker Desktop's folders without reordering the user's PATH", () => {
+    const env = withDockerPath('darwin', { PATH: '/opt/homebrew/bin:/usr/bin', HOME: '/Users/me' });
+    expect(env.PATH).toBe(
+      '/opt/homebrew/bin:/usr/bin:/usr/local/bin:/Applications/Docker.app/Contents/Resources/bin:/Users/me/.docker/bin',
+    );
+  });
+
+  it('keeps the Windows "Path" variable name', () => {
+    const env = withDockerPath('win32', { Path: 'C:\\Windows', ProgramFiles: 'C:\\Program Files' });
+    expect(env.Path).toBe('C:\\Windows;C:\\Program Files\\Docker\\Docker\\resources\\bin');
+    expect(env.PATH).toBeUndefined();
+  });
+});
+
+describe('compose failure hints', () => {
+  it('names the busy port', () => {
+    const out =
+      'Error response from daemon: driver failed programming external connectivity on endpoint x: Bind for 127.0.0.1:8090 failed: port is already allocated';
+    expect(composeFailureHint(out)).toMatch(/Port 8090 is already used/);
+    expect(composeFailureHint('listen tcp 0.0.0.0:3001: bind: address already in use')).toMatch(/Port 3001/);
+  });
+
+  it('recognises the common Docker failures', () => {
+    expect(composeFailureHint('invalid pool request: Pool overlaps with other one on this address space')).toMatch(/docker network prune/);
+    expect(composeFailureHint('Conflict. The container name "/postgres" is already in use by container "abc"')).toMatch(/docker rm -f postgres/);
+    expect(composeFailureHint('write /var/lib/docker/x: no space left on device')).toMatch(/disk space/);
+    expect(
+      composeFailureHint('error getting credentials - err: exec: "docker-credential-desktop": executable file not found in $PATH'),
+    ).toMatch(/saved login/);
+    expect(composeFailureHint('failed to resolve source metadata for docker.io/library/python:3.11-slim: i/o timeout')).toMatch(/internet/);
+    expect(composeFailureHint('dependency failed to start: container x-postgres-1 is unhealthy')).toMatch(/stopped while starting/);
+    expect(composeFailureHint('something new')).toBeUndefined();
   });
 });

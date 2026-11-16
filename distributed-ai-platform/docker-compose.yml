@@ -2,12 +2,12 @@
 # the VS Code gateway from another computer on your network, run
 #   BIND_ADDR=0.0.0.0 docker compose up -d
 # Worker nodes never connect in: the master connects out to them over SSH.
+# Docker picks a free subnet and names containers <project>-<service>-1, so
+# the platform never collides with other Compose stacks on the same machine.
+# Services reach each other by service name (e.g. http://ssh-executor:8011).
 networks:
   platform-net:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16
 
 services:
   # ==========================================
@@ -15,7 +15,6 @@ services:
   # ==========================================
   postgres:
     image: postgres:15
-    container_name: postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-platform}
@@ -44,7 +43,6 @@ services:
   # `make up-hdfs` / `make migrate-datasets`.
   namenode:
     image: apache/hadoop:3
-    container_name: namenode
     profiles: ["hdfs"]
     restart: unless-stopped
     user: root
@@ -75,7 +73,6 @@ services:
   # every start and is idempotent.
   hdfs-init:
     image: apache/hadoop:3
-    container_name: hdfs-init
     profiles: ["hdfs"]
     user: root
     environment:
@@ -97,7 +94,6 @@ services:
 
   datanode-1:
     image: apache/hadoop:3
-    container_name: datanode-1
     profiles: ["hdfs"]
     restart: unless-stopped
     hostname: datanode-1
@@ -124,7 +120,6 @@ services:
 
   datanode-2:
     image: apache/hadoop:3
-    container_name: datanode-2
     profiles: ["hdfs"]
     restart: unless-stopped
     hostname: datanode-2
@@ -147,7 +142,6 @@ services:
 
   datanode-3:
     image: apache/hadoop:3
-    container_name: datanode-3
     profiles: ["hdfs"]
     restart: unless-stopped
     hostname: datanode-3
@@ -178,7 +172,6 @@ services:
     build:
       context: .
       dockerfile: services/api-gateway/Dockerfile
-    container_name: api-gateway
     env_file:
       - config/.env
     ports:
@@ -202,7 +195,6 @@ services:
     build:
       context: .
       dockerfile: services/storage-service/Dockerfile
-    container_name: storage-service
     env_file:
       - config/.env
     environment:
@@ -245,7 +237,6 @@ services:
     # Ray keeps objects in shared memory; Docker's 64 MB default makes it
     # fall back to slow disk.
     shm_size: 2gb
-    container_name: ssh-executor
     # Lets a worker on this same computer be added as host.docker.internal
     # (built into Docker Desktop; this line adds it on Linux Docker Engine).
     extra_hosts:
@@ -277,7 +268,6 @@ services:
     build:
       context: .
       dockerfile: services/extension-gateway/Dockerfile
-    container_name: extension-gateway
     env_file:
       - config/.env
     environment:
@@ -299,7 +289,6 @@ services:
   frontend:
     build:
       context: frontend
-    container_name: frontend
     ports:
       - "${BIND_ADDR:-127.0.0.1}:${FRONTEND_PORT:-3001}:80"
     networks:
@@ -319,7 +308,6 @@ services:
     build:
       context: infrastructure/docker/ssh-worker
     image: distributed-compute/ssh-worker:dev
-    container_name: ssh-provider
     profiles: ["dev"]
     restart: unless-stopped
     networks:
@@ -330,7 +318,6 @@ services:
   ssh-provider-2:
     image: distributed-compute/ssh-worker:dev
     pull_policy: never
-    container_name: ssh-provider-2
     profiles: ["dev"]
     restart: unless-stopped
     depends_on:
