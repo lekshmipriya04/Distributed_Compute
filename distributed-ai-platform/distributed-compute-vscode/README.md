@@ -41,13 +41,16 @@ Computer** in the Distributed Compute view (the new icon in the Activity Bar).
 That one click:
 
 1. checks Docker, and starts Docker Desktop if it is closed;
-2. downloads the platform (once), or uses the copy in your workspace;
+2. downloads the platform (once; Git is not needed), or uses the copy in your
+   workspace;
 3. creates its settings with safe local defaults;
 4. builds and starts it. **The first time takes several minutes**; later starts
    take seconds;
 5. connects VS Code. There is nothing to type and no token to paste.
 
-From then on, opening VS Code starts the platform and connects by itself. The
+From then on, opening VS Code starts the platform and connects by itself. If
+Docker Desktop was closed, VS Code starts it and waits until the platform is
+ready. The
 status bar shows how many workers are online; click it for quick actions.
 
 The **Get Started** walkthrough (Welcome page → *Get Started with Distributed
@@ -87,8 +90,10 @@ get a one-line command to run on the worker instead.
 ![Step 3: the one-time password](media/readme/06-add-node-password.png)
 
 **How much to lend.** The extension shows what it detected (cores, memory, GPU,
-languages) and lets you choose a slice. "Half the machine" is a good start;
-you can change it later.
+languages) and lets you choose a slice. "Half the machine" is a good start.
+Choose **Custom…** to type your own number of cores (1 up to what the machine
+has) and, separately, how many GB of memory to lend. Change either later with
+**Configure Resource Slice** (right-click the node).
 
 ![Step 4: choose how much of the machine to lend](media/readme/07-add-node-slice.png)
 
@@ -312,6 +317,9 @@ also use the web dashboard.
 | "Docker is needed" | Install Docker Desktop, open it once, then **Set Up Platform** again. |
 | Docker "permission denied" (Linux) | `sudo usermod -aG docker $USER`, then log out and back in. |
 | The first setup seems stuck | The first build takes several minutes. Progress is in **Show Diagnostics**. |
+| "The platform did not start" | The message names the cause and the fix: a port already in use, no free network range (`docker network prune`), a full disk, no internet. Container states and logs are in **Show Diagnostics**. |
+| `Connection refused` at `host.docker.internal` (or `192.168.65.254`) port 22 | SSH is off on this computer. **macOS:** System Settings → General → Sharing → **Remote Login** on. **Linux:** `sudo systemctl enable --now ssh` (`sshd` on Fedora). **Windows:** install and start **OpenSSH Server**. |
+| Authentication failed when adding this computer | Use your short user name (on a Mac, `whoami` in Terminal) and your login password, not an SSH key or an Apple ID password. |
 | "Could not reach host" when adding a worker | Check the address (not `localhost`), that the machine is on, and that SSH runs on that port. |
 | "Wrong password" / password logins refused | Try again, or leave the password empty to get a command to install the key yourself. |
 | A worker shows `unreachable` | **Test Node Connection**. If it moved to a new address, remove it and add it again. |

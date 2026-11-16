@@ -18,7 +18,24 @@ the password, and removes the key when you remove the worker.
 
 ![VS Code running a file as 8 parallel tasks on two workers, with live output](distributed-ai-platform/distributed-compute-vscode/media/readme/13-live-output.png)
 
-## What's new in 1.0.1
+## What's new in 1.1
+
+1.1 makes setup work on any computer, not only the one it was built on.
+
+| | Before | Now (1.1.2) |
+|---|---|---|
+| Other Docker projects on the same computer | setup failed: fixed network range `172.20.0.0/16` and container names `postgres`, `frontend` clashed | Docker picks a free network range and names, so stacks never collide |
+| Git | needed to download the platform | **not needed**: the platform is downloaded as an archive |
+| Docker started from the Dock or Start menu | "Docker is missing", or pulls failed (`docker-credential-desktop` not found) | Docker Desktop's folders are found automatically |
+| Opening VS Code while Docker Desktop is closed | could leave services unable to reach each other | VS Code starts Docker, retries a service that was not ready yet, and repairs any container left without a network |
+| Two VS Code windows opening at once | both started the platform | the second window waits and then connects |
+| When setup fails | "see the output" | the message names the cause and the fix (busy port, no free network range, full disk, no internet, …) |
+| Upgrading the extension | kept the old downloaded platform | updates it and rebuilds; your data and settings are kept |
+| How much of a worker to lend | 4 ready-made choices | also **Custom…**: any number of cores and, separately, any amount of memory |
+
+Full list: [extension changelog](distributed-ai-platform/distributed-compute-vscode/CHANGELOG.md).
+
+## What came in 1.0.1
 
 | | 1.0.0 | 1.0.1 |
 |---|---|---|
@@ -72,7 +89,9 @@ deleted when the worker is removed.
 
 - **Add workers** with their SSH password, once. The platform shows the host
   key to confirm, detects CPU, memory, GPU and languages, and lets you choose
-  how much of each machine to lend.
+  how much of each machine to lend: a ready-made share (half, all but one
+  core, everything, one core) or your own number of cores and GB of memory.
+  The limits come from what was detected on that machine.
 - **Run project folders** (above), or a single file **in any language** your workers have (Python, Bash, Node.js, Go,
   Rust, Java, C/C++, Ruby, R, Julia, … or any command you give), as many
   parallel tasks, each in a throwaway sandbox. Watch every task's output live,
@@ -101,8 +120,9 @@ Desktop on Windows and macOS, Docker Engine or Desktop on Linux).
 **From VS Code, with no terminal:** install the
 [**Distributed AI Compute** extension](https://marketplace.visualstudio.com/items?itemName=aaron43210.distributed-ai-compute)
 and click **Set Up Now** when it asks. It starts Docker if needed,
-downloads the platform, starts it and connects. Then click **Add Compute
-Node**.
+downloads the platform (no Git needed), starts it and connects. Then click
+**Add Compute Node**. If something goes wrong, the error says what to do; see
+[Troubleshooting](distributed-ai-platform/distributed-compute-vscode/README.md#troubleshooting).
 
 **From a terminal:**
 
@@ -119,7 +139,7 @@ walk through every step with screenshots. Because the platform runs inside Docke
 
 | Worker | Address to enter |
 |---|---|
-| This computer | `host.docker.internal` (turn on SSH / Remote Login first) |
+| This computer | `host.docker.internal`, with your own user name and login password. Turn on SSH first: **macOS** System Settings → General → Sharing → **Remote Login**; **Linux** `sudo systemctl enable --now ssh` (`sshd` on Fedora); **Windows** Settings → Optional features → **OpenSSH Server** |
 | Another machine on your network | its IP address, e.g. `192.168.1.20` |
 | Two test workers, to try it out | run `make up-dev`, then `ssh-provider` (and `ssh-provider-2`), port `2222`, user `provider`, password `providerpass`. They are small Debian machines with Python 3.12, like a typical Linux PC |
 
@@ -251,6 +271,24 @@ For dashboard development with hot reload: `cd frontend && npm run dev`
 - Database changes are additive only; `make migrate-datasets` is the only
   data migration so far.
 
+## Roadmap: version 2 without Docker
+
+The next major version aims to need **no Docker at all**: install the
+extension and run tasks in parallel on this computer straight away, or spread
+them over many computers.
+
+- **This computer is a worker by default**: tasks run on your own cores with
+  no SSH and no setup.
+- **The master runs as plain local processes** with SQLite instead of Postgres;
+  `uv` provides Python, so nothing has to be installed first.
+- **Workers still keep nothing**: one temporary sandbox per worker for a whole
+  training run, deleted at the end; packages are sent from the master, so
+  workers need no internet.
+- **Docker mode stays** for shared team masters.
+
+The detailed plan, task by task:
+[docs/superpowers/plans/2026-11-16-v2-no-docker.md](distributed-ai-platform/docs/superpowers/plans/2026-11-16-v2-no-docker.md).
+
 ## Contributing
 
 Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Please read
@@ -270,7 +308,7 @@ distributed-ai-platform/
 ├── services/                    api-gateway, storage-service, ssh-executor (Python), extension-gateway (Go)
 ├── shared/                      shared Python library
 ├── infrastructure/docker/       Postgres init, test worker image, Hadoop config (optional HDFS)
-├── docs/                        architecture, API, deployment, images
+├── docs/                        architecture, API, deployment, images, version 2 plan
 └── tests/                       Python unit tests, load test
 ```
 
