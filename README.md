@@ -1,9 +1,10 @@
 # Distributed Compute
 
-[![CI](https://github.com/lekshmipriya04/Distributed_Compute/actions/workflows/ci.yml/badge.svg)](https://github.com/lekshmipriya04/Distributed_Compute/actions/workflows/ci.yml)
+[![CI](https://github.com/lekshmipriya04/Distributed_Compute/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/lekshmipriya04/Distributed_Compute/actions/workflows/ci.yml?query=branch%3Amain)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Version 1.1.2](https://img.shields.io/badge/version-1.1.2-informational)
-[![VS Code extension](https://img.shields.io/visual-studio-marketplace/v/aaron43210.distributed-ai-compute?label=VS%20Code%20extension)](https://marketplace.visualstudio.com/items?itemName=aaron43210.distributed-ai-compute)
+[![Version](https://img.shields.io/github/v/tag/lekshmipriya04/Distributed_Compute?label=version&sort=semver)](https://github.com/lekshmipriya04/Distributed_Compute/tags)
+[![VS Code Marketplace](https://img.shields.io/badge/VS%20Code%20Marketplace-install-007ACC?logo=visualstudiocode)](https://marketplace.visualstudio.com/items?itemName=aaron43210.distributed-ai-compute)
+[![Open VSX](https://img.shields.io/open-vsx/v/aaron43210/distributed-ai-compute?label=Open%20VSX)](https://open-vsx.org/extension/aaron43210/distributed-ai-compute)
 
 **Run your own code and models on the computers you already have, over
 plain SSH.** Lend a few cores of a lab machine, an old laptop or a server, then
